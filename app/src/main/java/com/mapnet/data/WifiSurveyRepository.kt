@@ -13,7 +13,13 @@ import androidx.room.withTransaction
 import com.mapnet.security.WifiSecurityClassifier
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.resume
+
+data class WifiScanOutcome(
+    val observationCount: Int,
+    val hasFreshResults: Boolean
+)
 
 class WifiSurveyRepository(
     private val context: Context,
@@ -28,10 +34,12 @@ class WifiSurveyRepository(
 
     /** Starts a platform scan and saves every returned BSSID as an individual AP. */
     @SuppressLint("MissingPermission")
-    suspend fun scanAndPersist(location: Location?): Int {
-        val results = awaitScanResults()
-        persist(results, location)
-        return results.size
+    suspend fun scanAndPersist(location: Location?): WifiScanOutcome {
+        val scan = awaitScanResults()
+        if (!scan.hasFreshResults) return WifiScanOutcome(observationCount = 0, hasFreshResults = false)
+
+        persist(scan.results, location)
+        return WifiScanOutcome(observationCount = scan.results.size, hasFreshResults = true)
     }
 
     suspend fun persist(results: List<ScanResult>, location: Location?) = database.withTransaction {
@@ -79,36 +87,46 @@ class WifiSurveyRepository(
     }
 
     @SuppressLint("MissingPermission")
-    private suspend fun awaitScanResults(): List<ScanResult> = suspendCancellableCoroutine { continuation ->
-        var registered = false
-        lateinit var receiver: BroadcastReceiver
-        fun unregister() {
-            if (registered) {
-                runCatching { context.unregisterReceiver(receiver) }
-                registered = false
-            }
-        }
-        receiver = object : BroadcastReceiver() {
-            override fun onReceive(receiverContext: Context, intent: Intent) {
-                if (intent.action == WifiManager.SCAN_RESULTS_AVAILABLE_ACTION && continuation.isActive) {
-                    unregister()
-                    continuation.resume(wifiManager.scanResults)
+    private suspend fun awaitScanResults(): ScanResults = withTimeoutOrNull(SCAN_RESULT_TIMEOUT_MS) {
+        suspendCancellableCoroutine { continuation ->
+            var registered = false
+            lateinit var receiver: BroadcastReceiver
+            fun unregister() {
+                if (registered) {
+                    runCatching { context.unregisterReceiver(receiver) }
+                    registered = false
                 }
             }
+
+            receiver = object : BroadcastReceiver() {
+                override fun onReceive(receiverContext: Context, intent: Intent) {
+                    if (intent.action == WifiManager.SCAN_RESULTS_AVAILABLE_ACTION && continuation.isActive) {
+                        val hasFreshResults = intent.getBooleanExtra(WifiManager.EXTRA_RESULTS_UPDATED, false)
+                        unregister()
+                        continuation.resume(ScanResults(wifiManager.scanResults, hasFreshResults))
+                    }
+                }
+            }
+            val filter = IntentFilter(WifiManager.SCAN_RESULTS_AVAILABLE_ACTION)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                @Suppress("DEPRECATION")
+                context.registerReceiver(receiver, filter)
+            }
+            registered = true
+            continuation.invokeOnCancellation { unregister() }
+            if (!wifiManager.startScan() && continuation.isActive) {
+                unregister()
+                continuation.resume(ScanResults(emptyList(), hasFreshResults = false))
+            }
         }
-        val filter = IntentFilter(WifiManager.SCAN_RESULTS_AVAILABLE_ACTION)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
-        } else {
-            @Suppress("DEPRECATION")
-            context.registerReceiver(receiver, filter)
-        }
-        registered = true
-        continuation.invokeOnCancellation { unregister() }
-        if (!wifiManager.startScan() && continuation.isActive) {
-            unregister()
-            continuation.resume(wifiManager.scanResults)
-        }
+    } ?: ScanResults(emptyList(), hasFreshResults = false)
+
+    private data class ScanResults(val results: List<ScanResult>, val hasFreshResults: Boolean)
+
+    private companion object {
+        const val SCAN_RESULT_TIMEOUT_MS = 15_000L
     }
 }
 

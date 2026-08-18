@@ -139,20 +139,27 @@ private fun MapNetApp(
     val selectedAp by viewModel.selectedAccessPoint.collectAsStateWithLifecycle()
     val history by viewModel.selectedHistory.collectAsStateWithLifecycle()
     val isScanning by viewModel.isScanning.collectAsStateWithLifecycle()
+    val isContinuousScanning by viewModel.isContinuousScanning.collectAsStateWithLifecycle()
     val status by viewModel.status.collectAsStateWithLifecycle()
     val updateState by updateViewModel.state.collectAsStateWithLifecycle()
     val networkToolsState by networkToolsViewModel.state.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     var connectionStatus by remember { androidx.compose.runtime.mutableStateOf<String?>(null) }
     var screen = remember { androidx.compose.runtime.mutableStateOf(MapNetScreen.SURVEY) }
+    var startContinuousAfterPermission by rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { granted ->
         if (granted[Manifest.permission.ACCESS_FINE_LOCATION] == true) {
-            viewModel.performScan { context.currentSurveyLocation() }
+            if (startContinuousAfterPermission) {
+                viewModel.startContinuousScan { context.currentSurveyLocation() }
+            } else {
+                viewModel.performScan { context.currentSurveyLocation() }
+            }
         } else {
             viewModel.clearStatus()
         }
+        startContinuousAfterPermission = false
     }
 
     LaunchedEffect(status) {
@@ -219,11 +226,22 @@ private fun MapNetApp(
                     summary = summary,
                     accessPoints = filteredAccessPoints,
                     isScanning = isScanning,
+                    isContinuousScanning = isContinuousScanning,
                     onFilter = viewModel::selectFilter,
                     onOpenOnly = { viewModel.selectFilter(SecurityFilter.OPEN) },
                     onScan = {
                         if (context.hasSurveyPermission()) viewModel.performScan { context.currentSurveyLocation() }
                         else permissionLauncher.launch(context.surveyPermissions())
+                    },
+                    onToggleContinuousScan = {
+                        if (isContinuousScanning) {
+                            viewModel.stopContinuousScan()
+                        } else if (context.hasSurveyPermission()) {
+                            viewModel.startContinuousScan { context.currentSurveyLocation() }
+                        } else {
+                            startContinuousAfterPermission = true
+                            permissionLauncher.launch(context.surveyPermissions())
+                        }
                     },
                     onDetails = viewModel::showDetails
                 )
@@ -379,9 +397,11 @@ private fun SurveyScreen(
     summary: SecuritySummary,
     accessPoints: List<AccessPointEntity>,
     isScanning: Boolean,
+    isContinuousScanning: Boolean,
     onFilter: (SecurityFilter) -> Unit,
     onOpenOnly: () -> Unit,
     onScan: () -> Unit,
+    onToggleContinuousScan: () -> Unit,
     onDetails: (String) -> Unit
 ) {
     Column(modifier.fillMaxSize()) {
@@ -394,13 +414,26 @@ private fun SurveyScreen(
                 Text("Wi-Fi survey", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                 Text("Local observations only", style = MaterialTheme.typography.bodySmall)
             }
-            Button(onClick = onScan, enabled = !isScanning) {
+            Button(onClick = onScan, enabled = !isScanning && !isContinuousScanning) {
                 if (isScanning) {
                     CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
                     Spacer(Modifier.width(8.dp))
                 }
                 Text(if (isScanning) "Scanning" else "Scan")
             }
+        }
+        Button(
+            onClick = onToggleContinuousScan,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+        ) {
+            Text(if (isContinuousScanning) "Stop continuous scan" else "Continuous scan")
+        }
+        if (isContinuousScanning) {
+            Text(
+                "Scanning about every 30 seconds while MapNet is open. If Android throttles a request, MapNet retries every 5 seconds until scanning resumes.",
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+            )
         }
         SecuritySummaryCard(summary, onOpenOnly)
         SecurityFilterBar(filter, onFilter)
