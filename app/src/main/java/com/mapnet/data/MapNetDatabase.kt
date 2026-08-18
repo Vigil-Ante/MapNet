@@ -17,7 +17,6 @@ class SecurityConverters {
     @TypeConverter fun fromValue(value: String): WifiSecurityType =
         WifiSecurityType.entries.firstOrNull { it.name == value } ?: WifiSecurityType.UNKNOWN
 }
-
 @Dao
 interface AccessPointDao {
     @Query("SELECT * FROM access_points ORDER BY lastSeenEpochMs DESC")
@@ -41,4 +40,3 @@ interface AccessPointDao {
 abstract class MapNetDatabase : RoomDatabase() {
     abstract fun accessPointDao(): AccessPointDao
 }
-

@@ -37,4 +37,3 @@ class WifiSecurityClassifierTest {
         assertEquals(expected, WifiSecurityClassifier.classify(raw).type)
     }
 }
-

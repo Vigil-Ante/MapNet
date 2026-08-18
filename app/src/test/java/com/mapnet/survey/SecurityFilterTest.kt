@@ -36,4 +36,3 @@ class SecurityFilterTest {
         assertFalse(SecurityFilter.OPEN.includes(hiddenSecured))
     }
 }
-

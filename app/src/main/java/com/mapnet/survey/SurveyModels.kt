@@ -37,4 +37,3 @@ fun List<AccessPointEntity>.securitySummary() = SecuritySummary(
     total = size,
     open = count { it.securityType == WifiSecurityType.OPEN }
 )
-

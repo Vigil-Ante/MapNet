@@ -18,4 +18,3 @@ data class SecurityProfile(
     val requiresPassword: Boolean,
     val isEncrypted: Boolean
 )
-

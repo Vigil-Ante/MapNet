@@ -22,7 +22,6 @@ data class AccessPointEntity(
     val longitude: Double?,
     val observationCount: Int
 )
-
 @Entity(
     tableName = "observations",
     foreignKeys = [ForeignKey(
@@ -48,4 +47,3 @@ data class ObservationEntity(
     val latitude: Double?,
     val longitude: Double?
 )
-
