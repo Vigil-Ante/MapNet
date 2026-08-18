@@ -44,7 +44,7 @@ jobs:
           set -euo pipefail
           VERSION_CODE=$((100000 + GITHUB_RUN_NUMBER))
           VERSION_NAME="${GITHUB_REF_NAME#v}"
-          ./gradlew testDebugUnitTest assembleRelease \
+          bash gradlew testDebugUnitTest assembleRelease \
             -PmapnetVersionCode="$VERSION_CODE" \
             -PmapnetVersionName="$VERSION_NAME"
           mkdir -p release-assets
