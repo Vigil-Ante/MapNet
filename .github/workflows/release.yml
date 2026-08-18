@@ -1,0 +1,68 @@
+name: Release MapNet
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Restore release keystore
+        env:
+          MAPNET_SIGNING_KEY_BASE64: ${{ secrets.MAPNET_SIGNING_KEY_BASE64 }}
+        run: |
+          test -n "$MAPNET_SIGNING_KEY_BASE64"
+          echo "$MAPNET_SIGNING_KEY_BASE64" | base64 --decode > "$RUNNER_TEMP/mapnet-release.jks"
+
+      - name: Test and build signed APK
+        env:
+          MAPNET_RELEASE_STORE_FILE: ${{ runner.temp }}/mapnet-release.jks
+          MAPNET_RELEASE_STORE_PASSWORD: ${{ secrets.MAPNET_RELEASE_STORE_PASSWORD }}
+          MAPNET_RELEASE_KEY_ALIAS: ${{ secrets.MAPNET_RELEASE_KEY_ALIAS }}
+          MAPNET_RELEASE_KEY_PASSWORD: ${{ secrets.MAPNET_RELEASE_KEY_PASSWORD }}
+          MAPNET_UPDATE_MANIFEST_URL: https://github.com/${{ github.repository }}/releases/latest/download/mapnet-update.json
+        run: |
+          set -euo pipefail
+          VERSION_CODE=$((100000 + GITHUB_RUN_NUMBER))
+          VERSION_NAME="${GITHUB_REF_NAME#v}"
+          ./gradlew testDebugUnitTest assembleRelease \
+            -PmapnetVersionCode="$VERSION_CODE" \
+            -PmapnetVersionName="$VERSION_NAME"
+          mkdir -p release-assets
+          cp app/build/outputs/apk/release/app-release.apk "release-assets/MapNet-${GITHUB_REF_NAME}.apk"
+          SHA256=$(sha256sum "release-assets/MapNet-${GITHUB_REF_NAME}.apk" | awk '{print $1}')
+          APK_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/MapNet-${GITHUB_REF_NAME}.apk"
+          jq -n \
+            --argjson versionCode "$VERSION_CODE" \
+            --arg versionName "$VERSION_NAME" \
+            --arg apkUrl "$APK_URL" \
+            --arg sha256 "$SHA256" \
+            '{versionCode: $versionCode, versionName: $versionName, apkUrl: $apkUrl, sha256: $sha256}' \
+            > release-assets/mapnet-update.json
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            release-assets/MapNet-${{ github.ref_name }}.apk
+            release-assets/mapnet-update.json

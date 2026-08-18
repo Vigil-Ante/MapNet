@@ -1,0 +1,3 @@
+# The URL is embedded in the APK when it is built. Point it at a GitHub Release asset.
+# Do not commit update.properties; copy this file and replace OWNER/REPOSITORY.
+update.manifest.url=https://github.com/OWNER/REPOSITORY/releases/latest/download/mapnet-update.json
