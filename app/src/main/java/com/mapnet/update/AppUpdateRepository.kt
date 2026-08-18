@@ -207,4 +207,7 @@ class AppUpdateRepository(private val context: Context) {
 
 private fun ByteArray.toHex(): String = joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
 
-private fun Throwable.userMessage(fallback: String): String = message?.takeIf { it.isNotBlank() } ?: fallback
+private fun Throwable.userMessage(fallback: String): String = when {
+    message?.contains("HTTP 404") == true -> "No MapNet release has been published yet."
+    else -> message?.takeIf { it.isNotBlank() } ?: fallback
+}

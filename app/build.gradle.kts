@@ -19,7 +19,9 @@ fun configuredValue(propertyName: String, filePropertyName: String): String? =
         ?: providers.environmentVariable(propertyName).orNull
         ?: updateProperties.getProperty(filePropertyName)
 
-val updateManifestUrl = configuredValue("MAPNET_UPDATE_MANIFEST_URL", "update.manifest.url").orEmpty()
+val updateManifestUrl = configuredValue("MAPNET_UPDATE_MANIFEST_URL", "update.manifest.url")
+    .orEmpty()
+    .ifBlank { "https://github.com/Vigil-Ante/MapNet/releases/latest/download/mapnet-update.json" }
 val configuredVersionCode = providers.gradleProperty("mapnetVersionCode").orNull?.toIntOrNull()
 val configuredVersionName = providers.gradleProperty("mapnetVersionName").orNull
 val releaseStoreFile = configuredValue("MAPNET_RELEASE_STORE_FILE", "release.store.file")

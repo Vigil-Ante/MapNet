@@ -33,6 +33,29 @@ data class SecuritySummary(val total: Int, val open: Int) {
     val secured: Int get() = total - open
 }
 
+/**
+ * A user-facing survey is organized by Wi-Fi name, not radio BSSID. The raw
+ * BSSID rows remain in Room so a later scan can still show observation history.
+ */
+fun List<AccessPointEntity>.collapseByNetworkName(): List<AccessPointEntity> =
+    groupBy { accessPoint ->
+        val normalizedName = accessPoint.ssid.trim()
+        if (normalizedName.equals("<Hidden SSID>", ignoreCase = true) || normalizedName.isBlank()) {
+            // Hidden SSIDs have no stable name to merge on; retain each radio separately.
+            "hidden:${accessPoint.bssid}"
+        } else {
+            "ssid:$normalizedName"
+        }
+    }
+        .values
+        .map { matchingAccessPoints ->
+            matchingAccessPoints.maxWithOrNull(
+                compareBy<AccessPointEntity> { it.lastSeenEpochMs }
+                    .thenBy { it.signalDbm }
+            )!!
+        }
+        .sortedByDescending { it.lastSeenEpochMs }
+
 fun List<AccessPointEntity>.securitySummary() = SecuritySummary(
     total = size,
     open = count { it.securityType == WifiSecurityType.OPEN }

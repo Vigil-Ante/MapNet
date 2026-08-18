@@ -1,6 +1,6 @@
 # MapNet
 
-MapNet is a local-first Android Wi-Fi survey MVP. It records each BSSID as a separate access point, retains historical observations, and classifies Android scan capabilities into an understandable security state.
+MapNet is a local-first Android Wi-Fi survey MVP. It retains each BSSID as a local historical observation while showing one current survey entry per visible Wi-Fi name, and classifies Android scan capabilities into an understandable security state.
 
 ## Included MVP workflow
 
@@ -9,6 +9,8 @@ MapNet is a local-first Android Wi-Fi survey MVP. It records each BSSID as a sep
 3. Flag traditional open networks with an accessible `⚠ OPEN` label.
 4. Filter the list and the survey map together by security type.
 5. Inspect an AP’s normalized security details and observations count.
+6. Request Android-approved connections to open and personal WPA networks, or open Wi-Fi Settings for networks that require enterprise/legacy configuration.
+7. Inspect the active Wi-Fi connection’s IP details, run Ping, and run a local traceroute from the Tools tab.
 
 `OWE / Enhanced Open` is deliberately shown as passwordless **and encrypted**, rather than as a traditional open network.
 

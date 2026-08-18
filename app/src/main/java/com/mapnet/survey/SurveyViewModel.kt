@@ -28,14 +28,16 @@ class SurveyViewModel(private val repository: WifiSurveyRepository) : ViewModel(
     val filter: StateFlow<SecurityFilter> = selectedFilter
     val isScanning: StateFlow<Boolean> = scanning
     val status: StateFlow<String?> = scanStatus
-    val accessPoints = repository.observeAccessPoints()
+    private val rawAccessPoints = repository.observeAccessPoints()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val accessPoints = rawAccessPoints.map { it.collapseByNetworkName() }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val filteredAccessPoints = combine(accessPoints, selectedFilter) { accessPoints, filter ->
         accessPoints.filter(filter::includes)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val summary = accessPoints.map { it.securitySummary() }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SecuritySummary(0, 0))
-    val selectedAccessPoint = combine(accessPoints, selectedBssid) { list, bssid ->
+    val selectedAccessPoint = combine(rawAccessPoints, selectedBssid) { list, bssid ->
         list.firstOrNull { it.bssid == bssid }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
     val selectedHistory = selectedBssid.flatMapLatest { bssid ->

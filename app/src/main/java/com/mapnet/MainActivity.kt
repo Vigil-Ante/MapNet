@@ -22,6 +22,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -50,6 +52,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -61,6 +64,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -68,11 +73,16 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.room.Room
+import com.mapnet.connection.WifiConnectionRequester
+import com.mapnet.connection.canConnectWithMapNet
+import com.mapnet.connection.needsPassphrase
 import com.mapnet.data.AccessPointEntity
 import com.mapnet.data.MapNetDatabase
 import com.mapnet.data.ObservationEntity
@@ -81,6 +91,8 @@ import com.mapnet.security.WifiSecurityType
 import com.mapnet.survey.SecurityFilter
 import com.mapnet.survey.SecuritySummary
 import com.mapnet.survey.SurveyViewModel
+import com.mapnet.tools.NetworkToolsUiState
+import com.mapnet.tools.NetworkToolsViewModel
 import com.mapnet.update.UpdateUiState
 import com.mapnet.update.UpdateViewModel
 import java.text.DateFormat
@@ -102,19 +114,24 @@ class MainActivity : ComponentActivity() {
         SurveyViewModel.Factory(WifiSurveyRepository(applicationContext, database))
     }
     private val updateViewModel: UpdateViewModel by viewModels()
+    private val networkToolsViewModel: NetworkToolsViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        setContent { MapNetApp(viewModel, updateViewModel) }
+        setContent { MapNetApp(viewModel, updateViewModel, networkToolsViewModel) }
     }
 }
 
-private enum class MapNetScreen(val title: String) { SURVEY("Survey"), MAP("Map") }
+private enum class MapNetScreen(val title: String) { SURVEY("Survey"), MAP("Map"), TOOLS("Tools") }
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
-private fun MapNetApp(viewModel: SurveyViewModel, updateViewModel: UpdateViewModel) {
+private fun MapNetApp(
+    viewModel: SurveyViewModel,
+    updateViewModel: UpdateViewModel,
+    networkToolsViewModel: NetworkToolsViewModel
+) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val filter by viewModel.filter.collectAsStateWithLifecycle()
     val filteredAccessPoints by viewModel.filteredAccessPoints.collectAsStateWithLifecycle()
@@ -124,7 +141,9 @@ private fun MapNetApp(viewModel: SurveyViewModel, updateViewModel: UpdateViewMod
     val isScanning by viewModel.isScanning.collectAsStateWithLifecycle()
     val status by viewModel.status.collectAsStateWithLifecycle()
     val updateState by updateViewModel.state.collectAsStateWithLifecycle()
+    val networkToolsState by networkToolsViewModel.state.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
+    var connectionStatus by remember { androidx.compose.runtime.mutableStateOf<String?>(null) }
     var screen = remember { androidx.compose.runtime.mutableStateOf(MapNetScreen.SURVEY) }
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -156,6 +175,13 @@ private fun MapNetApp(viewModel: SurveyViewModel, updateViewModel: UpdateViewMod
         }
     }
 
+    LaunchedEffect(connectionStatus) {
+        connectionStatus?.let {
+            snackbarHostState.showSnackbar(it)
+            connectionStatus = null
+        }
+    }
+
     MaterialTheme {
         Scaffold(
             topBar = {
@@ -171,7 +197,15 @@ private fun MapNetApp(viewModel: SurveyViewModel, updateViewModel: UpdateViewMod
                         NavigationBarItem(
                             selected = screen.value == destination,
                             onClick = { screen.value = destination },
-                            icon = { Text(if (destination == MapNetScreen.SURVEY) "⌁" else "⌖") },
+                            icon = {
+                                Text(
+                                    when (destination) {
+                                        MapNetScreen.SURVEY -> "⌁"
+                                        MapNetScreen.MAP -> "⌖"
+                                        MapNetScreen.TOOLS -> "⌘"
+                                    }
+                                )
+                            },
                             label = { Text(destination.title) }
                         )
                     }
@@ -200,6 +234,13 @@ private fun MapNetApp(viewModel: SurveyViewModel, updateViewModel: UpdateViewMod
                     onFilter = viewModel::selectFilter,
                     onDetails = viewModel::showDetails
                 )
+                MapNetScreen.TOOLS -> NetworkToolsScreen(
+                    modifier = Modifier.padding(padding),
+                    state = networkToolsState,
+                    onRefresh = networkToolsViewModel::refresh,
+                    onPing = networkToolsViewModel::ping,
+                    onTraceroute = networkToolsViewModel::traceroute
+                )
             }
         }
         selectedAp?.let { ap ->
@@ -207,6 +248,9 @@ private fun MapNetApp(viewModel: SurveyViewModel, updateViewModel: UpdateViewMod
                 accessPoint = ap,
                 history = history,
                 hasSecurityChange = history.any { it.securityType != ap.securityType },
+                onConnect = { passphrase ->
+                    connectionStatus = WifiConnectionRequester(context).requestConnection(ap, passphrase)
+                },
                 onDismiss = viewModel::dismissDetails
             )
         }
@@ -216,6 +260,66 @@ private fun MapNetApp(viewModel: SurveyViewModel, updateViewModel: UpdateViewMod
             onInstall = updateViewModel::requestInstall,
             onDismiss = updateViewModel::dismissDialog
         )
+    }
+}
+
+@Composable
+private fun NetworkToolsScreen(
+    modifier: Modifier,
+    state: NetworkToolsUiState,
+    onRefresh: () -> Unit,
+    onPing: (String) -> Unit,
+    onTraceroute: (String) -> Unit
+) {
+    var destination by rememberSaveable { androidx.compose.runtime.mutableStateOf("1.1.1.1") }
+    Column(
+        modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Text("Network tools", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Text("Diagnostics run locally over the device's active Wi-Fi connection.", style = MaterialTheme.typography.bodySmall)
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("CURRENT CONNECTED AP", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                state.connection?.let { connection ->
+                    DetailRow("Wi-Fi name", connection.ssid)
+                    DetailRow("BSSID", connection.bssid)
+                    DetailRow("IPv4", connection.ipv4Addresses.ifEmpty { listOf("Unavailable") }.joinToString())
+                    DetailRow("Gateway", connection.gateway ?: "Unavailable")
+                    DetailRow("DNS", connection.dnsServers.ifEmpty { listOf("Unavailable") }.joinToString())
+                } ?: Text("No active Wi-Fi connection detected. Connect in Android, then tap Refresh.")
+            }
+        }
+        Button(onClick = onRefresh, modifier = Modifier.align(Alignment.End)) { Text("Refresh IP details") }
+        OutlinedTextField(
+            value = destination,
+            onValueChange = { destination = it },
+            label = { Text("Destination (host or IP)") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            Button(onClick = { onPing(destination) }, enabled = !state.isRunning, modifier = Modifier.weight(1f)) {
+                Text("Ping")
+            }
+            Button(onClick = { onTraceroute(destination) }, enabled = !state.isRunning, modifier = Modifier.weight(1f)) {
+                Text("Traceroute")
+            }
+        }
+        if (state.isRunning) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                Text("Running ${state.outputTitle?.lowercase().orEmpty()}…")
+            }
+        }
+        state.output?.let { output ->
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(state.outputTitle ?: "Result", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                    Text(output, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
     }
 }
 
@@ -323,7 +427,7 @@ private fun SecuritySummaryCard(summary: SecuritySummary, onOpenOnly: () -> Unit
             Text("NETWORKS DETECTED", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(10.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                SummaryMetric("Total APs", summary.total.toString())
+                SummaryMetric("Networks", summary.total.toString())
                 SummaryMetric("Secured", summary.secured.toString())
                 Column(horizontalAlignment = Alignment.End, modifier = Modifier.clickable(onClick = onOpenOnly)) {
                     Text("Open", style = MaterialTheme.typography.labelMedium)
@@ -496,11 +600,22 @@ private fun AccessPointDetailDialog(
     accessPoint: AccessPointEntity,
     history: List<ObservationEntity>,
     hasSecurityChange: Boolean,
+    onConnect: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
+    val supportsDirectConnection = accessPoint.securityType.canConnectWithMapNet() && accessPoint.ssid != "<Hidden SSID>"
+    val needsPassphrase = supportsDirectConnection && accessPoint.securityType.needsPassphrase()
+    var passphrase by rememberSaveable(accessPoint.bssid) { androidx.compose.runtime.mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        confirmButton = { Button(onClick = onDismiss) { Text("Done") } },
+        confirmButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = { onConnect(passphrase) }) {
+                    Text(if (supportsDirectConnection) "Connect" else "Wi-Fi settings")
+                }
+                TextButton(onClick = onDismiss) { Text("Done") }
+            }
+        },
         title = { Text(accessPoint.ssid) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -513,6 +628,22 @@ private fun AccessPointDetailDialog(
                 DetailRow("Raw Capabilities", accessPoint.securityCapabilities.ifBlank { "(none advertised)" })
                 if (hasSecurityChange) Text("Security configuration changed", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.SemiBold)
                 Text("${accessPoint.observationCount} observations stored", style = MaterialTheme.typography.bodySmall)
+                if (needsPassphrase) {
+                    OutlinedTextField(
+                        value = passphrase,
+                        onValueChange = { passphrase = it },
+                        label = { Text("Wi-Fi password") },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Text("The password is used only for this Android connection request and is not stored by MapNet.", style = MaterialTheme.typography.bodySmall)
+                } else if (!supportsDirectConnection) {
+                    Text("This security type needs Android Wi-Fi settings for its full connection configuration.", style = MaterialTheme.typography.bodySmall)
+                } else {
+                    Text("Connect sends this access point to Android for approval.", style = MaterialTheme.typography.bodySmall)
+                }
                 if (history.isNotEmpty()) {
                     Text("OBSERVATIONS", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 8.dp))
                     history.take(3).forEach { observation ->
