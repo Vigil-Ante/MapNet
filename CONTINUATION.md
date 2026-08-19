@@ -6,12 +6,12 @@ This file is for the next development agent working on MapNet. Read it before ch
 
 - Repository: <https://github.com/Vigil-Ante/MapNet>
 - Default branch: `main`
-- Current release: `v0.2.4` (being published from the current `main` commit)
-- Current signed APK: <https://github.com/Vigil-Ante/MapNet/releases/download/v0.2.4/MapNet-v0.2.4.apk>
+- Current release: `v0.2.5` (being published from the current `main` commit)
+- Current signed APK: <https://github.com/Vigil-Ante/MapNet/releases/download/v0.2.5/MapNet-v0.2.5.apk>
 - Package/application ID: `com.mapnet`
 - Minimum Android version: API 26 (Android 8.0)
 
-`v0.2.2` introduced the network diagnostics tool and the required `ACCESS_NETWORK_STATE` permission, fixing the launch crash present in `v0.2.1`. `v0.2.3` replaces the unreliable Wi-Fi Suggestion approval flow with Android's explicit saved-network confirmation screen, and adds search and deletion. `v0.2.4` follows an `ADD_WIFI_RESULT_ALREADY_EXISTS` result with Android's user-approved Wi-Fi Network Request prompt, so a saved AP can be connected for MapNet rather than ending at the informational result.
+`v0.2.2` introduced the network diagnostics tool and the required `ACCESS_NETWORK_STATE` permission, fixing the launch crash present in `v0.2.1`. `v0.2.3` replaces the unreliable Wi-Fi Suggestion approval flow with Android's explicit saved-network confirmation screen, and adds search and deletion. `v0.2.4` follows an `ADD_WIFI_RESULT_ALREADY_EXISTS` result with Android's user-approved Wi-Fi Network Request prompt, so a saved AP can be connected for MapNet rather than ending at the informational result. `v0.2.5` adds the required `CHANGE_NETWORK_STATE` permission for that request and MapNet's process network binding.
 
 ## Implemented behavior
 
@@ -77,7 +77,7 @@ The updater endpoint is configured in `app/build.gradle.kts`:
 
 ## Suggested next work
 
-1. Test v0.2.4 on a physical Android device, especially the Android system confirmation screens for a new network and an already-saved network, the search list, deletion/re-scan behavior, and the in-app update flow.
+1. Test v0.2.5 on a physical Android device, especially the Android system confirmation screens for a new network and an already-saved network, the search list, deletion/re-scan behavior, and the in-app update flow.
 2. Add device-level/instrumented tests where a physical device or emulator is available.
 3. Consider improving the map view only after confirming the current map data and location permissions work on-device.
 4. Evaluate Android’s long-term replacement options for deprecated active Wi-Fi scan APIs before targeting newer platform changes.
