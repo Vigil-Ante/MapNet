@@ -61,6 +61,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -81,6 +82,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.room.Room
 import com.mapnet.connection.WifiConnectionAction
+import com.mapnet.connection.WifiNetworkAddResult
 import com.mapnet.connection.WifiConnectionRequester
 import com.mapnet.connection.canConnectWithMapNet
 import com.mapnet.connection.needsPassphrase
@@ -146,13 +148,32 @@ private fun MapNetApp(
     val updateState by updateViewModel.state.collectAsStateWithLifecycle()
     val networkToolsState by networkToolsViewModel.state.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
+    val connectionRequester = remember(context) { WifiConnectionRequester(context) }
     var connectionStatus by remember { androidx.compose.runtime.mutableStateOf<String?>(null) }
+    var pendingNetworkAddition by remember { androidx.compose.runtime.mutableStateOf<PendingNetworkAddition?>(null) }
     var screen = remember { androidx.compose.runtime.mutableStateOf(MapNetScreen.SURVEY) }
     var startContinuousAfterPermission by rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
     val addNetworkLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        connectionStatus = WifiConnectionRequester.addNetworkResultMessage(result.resultCode, result.data)
+        val pendingConnection = pendingNetworkAddition
+        pendingNetworkAddition = null
+        connectionStatus = when (WifiConnectionRequester.addNetworkResult(result.resultCode, result.data)) {
+            WifiNetworkAddResult.Saved -> "Network saved by Android. It is now eligible to connect."
+            WifiNetworkAddResult.AlreadySaved -> pendingConnection?.let { pending ->
+                connectionRequester.requestSavedNetworkConnection(
+                    accessPoint = pending.accessPoint,
+                    passphrase = pending.passphrase,
+                    onStatus = { connectionStatus = it }
+                )
+            } ?: "This network is already saved by Android."
+            WifiNetworkAddResult.Failed -> "Android could not save this network. Check the password and try again."
+            WifiNetworkAddResult.Rejected -> "Android canceled the network addition."
+        }
+    }
+
+    DisposableEffect(connectionRequester) {
+        onDispose(connectionRequester::cancelRequestedConnection)
     }
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -276,8 +297,11 @@ private fun MapNetApp(
                 history = history,
                 hasSecurityChange = history.any { it.securityType != ap.securityType },
                 onConnect = { passphrase ->
-                    when (val action = WifiConnectionRequester(context).requestConnection(ap, passphrase)) {
-                        is WifiConnectionAction.LaunchAddNetworkConfirmation -> addNetworkLauncher.launch(action.intent)
+                    when (val action = connectionRequester.requestConnection(ap, passphrase)) {
+                        is WifiConnectionAction.LaunchAddNetworkConfirmation -> {
+                            pendingNetworkAddition = PendingNetworkAddition(ap, passphrase)
+                            addNetworkLauncher.launch(action.intent)
+                        }
                         is WifiConnectionAction.ShowMessage -> connectionStatus = action.message
                     }
                 },
@@ -725,7 +749,7 @@ private fun AccessPointDetailDialog(
                 } else if (!supportsDirectConnection) {
                     Text("This security type needs Android Wi-Fi settings for its full connection configuration.", style = MaterialTheme.typography.bodySmall)
                 } else {
-                    Text("Connect opens Android's confirmation screen to add this network to your saved Wi-Fi networks.", style = MaterialTheme.typography.bodySmall)
+                    Text("Connect saves a new network through Android. If it is already saved, Android will show a separate approval prompt to connect it for MapNet.", style = MaterialTheme.typography.bodySmall)
                 }
                 if (history.isNotEmpty()) {
                     Text("OBSERVATIONS", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 8.dp))
@@ -740,6 +764,11 @@ private fun AccessPointDetailDialog(
         }
     )
 }
+
+private data class PendingNetworkAddition(
+    val accessPoint: AccessPointEntity,
+    val passphrase: String
+)
 
 @Composable
 private fun DetailRow(label: String, value: String) = Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {

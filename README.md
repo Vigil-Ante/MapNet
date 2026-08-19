@@ -9,7 +9,7 @@ MapNet is a local-first Android Wi-Fi survey MVP. It retains each BSSID as a loc
 3. Flag traditional open networks with an accessible `⚠ OPEN` label.
 4. Filter the list and the survey map together by security type.
 5. Inspect an AP’s normalized security details and observations count, or delete the local network record and its local history. A later scan can rediscover a deleted network.
-6. On Android 11 or newer, request Android's explicit confirmation to add supported open and personal WPA networks as a normal saved Wi-Fi network. Enterprise, legacy, hidden, and Android 10 configurations open Wi-Fi Settings instead.
+6. On Android 11 or newer, request Android's explicit confirmation to add supported open and personal WPA networks as a normal saved Wi-Fi network. If Android reports that the network is already saved, MapNet follows with Android's user-approved connection prompt for that network. Enterprise, legacy, hidden, and Android 10 configurations open Wi-Fi Settings instead.
 7. Inspect the active Wi-Fi connection’s IP details, run Ping, and run a local traceroute from the Tools tab.
 
 Continuous scan requests a normal scan roughly every 30 seconds. When Android declines a request because of its system-level Wi-Fi scan throttle, MapNet retries every five seconds until Android accepts one; Android does not expose an exact throttle-expiry notification.

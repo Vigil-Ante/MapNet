@@ -6,20 +6,19 @@ This file is for the next development agent working on MapNet. Read it before ch
 
 - Repository: <https://github.com/Vigil-Ante/MapNet>
 - Default branch: `main`
-- Current release: `v0.2.3`
-- Current release commit: `e73d3d5876f53fddfd8541c4e80d34ef20a06785`
-- Current signed APK: <https://github.com/Vigil-Ante/MapNet/releases/download/v0.2.3/MapNet-v0.2.3.apk>
+- Current release: `v0.2.4` (being published from the current `main` commit)
+- Current signed APK: <https://github.com/Vigil-Ante/MapNet/releases/download/v0.2.4/MapNet-v0.2.4.apk>
 - Package/application ID: `com.mapnet`
 - Minimum Android version: API 26 (Android 8.0)
 
-`v0.2.2` introduced the network diagnostics tool and the required `ACCESS_NETWORK_STATE` permission, fixing the launch crash present in `v0.2.1`. `v0.2.3` replaces the unreliable Wi-Fi Suggestion approval flow with Android's explicit saved-network confirmation screen, and adds search and deletion.
+`v0.2.2` introduced the network diagnostics tool and the required `ACCESS_NETWORK_STATE` permission, fixing the launch crash present in `v0.2.1`. `v0.2.3` replaces the unreliable Wi-Fi Suggestion approval flow with Android's explicit saved-network confirmation screen, and adds search and deletion. `v0.2.4` follows an `ADD_WIFI_RESULT_ALREADY_EXISTS` result with Android's user-approved Wi-Fi Network Request prompt, so a saved AP can be connected for MapNet rather than ending at the informational result.
 
 ## Implemented behavior
 
 - Wi-Fi survey observations are saved locally with BSSID-level history.
 - The visible survey list, map, and summary collapse visible networks by Wi-Fi name (SSID), preventing duplicate entries across scans. Hidden/unavailable SSIDs remain separate by BSSID.
 - The Survey list can be searched by Wi-Fi name or BSSID.
-- AP details open Android's explicit `ACTION_WIFI_ADD_NETWORKS` confirmation screen for supported open/personal WPA networks on Android 11 and newer. This adds the network as a normal user-managed saved Wi-Fi network. Android 10, enterprise, legacy, and hidden configurations open Android Wi-Fi Settings instead.
+- AP details open Android's explicit `ACTION_WIFI_ADD_NETWORKS` confirmation screen for supported open/personal WPA networks on Android 11 and newer. This adds the network as a normal user-managed saved Wi-Fi network. If Android reports the requested configuration already exists, MapNet starts an Android-approved Wi-Fi Network Request and binds MapNet to the connected network while the app remains open. Android 10, enterprise, legacy, and hidden configurations open Android Wi-Fi Settings instead.
 - Deleting a visible AP removes every matching visible network record and its local BSSID observation history. It is not a permanent blocklist: a later scan can rediscover it.
 - The **Tools** tab displays current Wi-Fi SSID/BSSID, IPv4 addresses, gateway, and DNS, and offers Ping and traceroute.
 - The **Continuous scan** button runs while the app is open:
@@ -46,7 +45,7 @@ The published release workflow runs the unit tests and builds a signed release A
 
 `/.github/workflows/release.yml`
 
-GitHub Actions run for v0.2.3: <https://github.com/Vigil-Ante/MapNet/actions/runs/32264427101>
+GitHub Actions runs: <https://github.com/Vigil-Ante/MapNet/actions>
 
 ## Releases and signing
 
@@ -78,7 +77,7 @@ The updater endpoint is configured in `app/build.gradle.kts`:
 
 ## Suggested next work
 
-1. Test v0.2.3 on a physical Android device, especially the Android system confirmation screen for Connect, the search list, deletion/re-scan behavior, and the in-app update flow.
+1. Test v0.2.4 on a physical Android device, especially the Android system confirmation screens for a new network and an already-saved network, the search list, deletion/re-scan behavior, and the in-app update flow.
 2. Add device-level/instrumented tests where a physical device or emulator is available.
 3. Consider improving the map view only after confirming the current map data and location permissions work on-device.
 4. Evaluate Android’s long-term replacement options for deprecated active Wi-Fi scan APIs before targeting newer platform changes.
