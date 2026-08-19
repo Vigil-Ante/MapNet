@@ -33,6 +33,12 @@ interface AccessPointDao {
 
     @Query("SELECT * FROM observations WHERE bssid = :bssid ORDER BY observedAtEpochMs DESC")
     fun observeHistory(bssid: String): Flow<List<ObservationEntity>>
+
+    @Query("DELETE FROM access_points WHERE bssid = :bssid")
+    suspend fun deleteByBssid(bssid: String): Int
+
+    @Query("DELETE FROM access_points WHERE LOWER(TRIM(ssid)) = LOWER(TRIM(:ssid))")
+    suspend fun deleteByNetworkName(ssid: String): Int
 }
 
 @Database(entities = [AccessPointEntity::class, ObservationEntity::class], version = 1, exportSchema = false)

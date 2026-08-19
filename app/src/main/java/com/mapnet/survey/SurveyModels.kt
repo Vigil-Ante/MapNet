@@ -29,6 +29,13 @@ fun SecurityFilter.includes(ap: AccessPointEntity): Boolean = when (this) {
     SecurityFilter.OWE -> ap.securityType == WifiSecurityType.OWE
 }
 
+fun AccessPointEntity.matchesSearch(query: String): Boolean {
+    val normalizedQuery = query.trim()
+    return normalizedQuery.isBlank() ||
+        ssid.contains(normalizedQuery, ignoreCase = true) ||
+        bssid.contains(normalizedQuery, ignoreCase = true)
+}
+
 data class SecuritySummary(val total: Int, val open: Int) {
     val secured: Int get() = total - open
 }

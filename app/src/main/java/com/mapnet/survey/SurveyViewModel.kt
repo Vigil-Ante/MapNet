@@ -24,6 +24,7 @@ import kotlinx.coroutines.CancellationException
 @OptIn(ExperimentalCoroutinesApi::class)
 class SurveyViewModel(private val repository: WifiSurveyRepository) : ViewModel() {
     private val selectedFilter = MutableStateFlow(SecurityFilter.ALL)
+    private val search = MutableStateFlow("")
     private val selectedBssid = MutableStateFlow<String?>(null)
     private val scanning = MutableStateFlow(false)
     private val continuousScanning = MutableStateFlow(false)
@@ -31,6 +32,7 @@ class SurveyViewModel(private val repository: WifiSurveyRepository) : ViewModel(
     private var continuousScanJob: Job? = null
 
     val filter: StateFlow<SecurityFilter> = selectedFilter
+    val searchQuery: StateFlow<String> = search
     val isScanning: StateFlow<Boolean> = scanning
     val isContinuousScanning: StateFlow<Boolean> = continuousScanning
     val status: StateFlow<String?> = scanStatus
@@ -38,8 +40,10 @@ class SurveyViewModel(private val repository: WifiSurveyRepository) : ViewModel(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val accessPoints = rawAccessPoints.map { it.collapseByNetworkName() }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-    val filteredAccessPoints = combine(accessPoints, selectedFilter) { accessPoints, filter ->
-        accessPoints.filter(filter::includes)
+    val filteredAccessPoints = combine(accessPoints, selectedFilter, search) { accessPoints, filter, query ->
+        accessPoints.filter { accessPoint ->
+            filter.includes(accessPoint) && accessPoint.matchesSearch(query)
+        }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val summary = accessPoints.map { it.securitySummary() }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SecuritySummary(0, 0))
@@ -51,6 +55,7 @@ class SurveyViewModel(private val repository: WifiSurveyRepository) : ViewModel(
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList<ObservationEntity>())
 
     fun selectFilter(filter: SecurityFilter) { selectedFilter.value = filter }
+    fun setSearchQuery(query: String) { search.value = query }
     fun showDetails(bssid: String) { selectedBssid.value = bssid }
     fun dismissDetails() { selectedBssid.value = null }
     fun clearStatus() { scanStatus.value = null }
@@ -81,6 +86,21 @@ class SurveyViewModel(private val repository: WifiSurveyRepository) : ViewModel(
         continuousScanJob = null
         continuousScanning.value = false
         scanStatus.value = "Continuous scan stopped."
+    }
+
+    fun deleteAccessPoint(accessPoint: AccessPointEntity) = viewModelScope.launch {
+        runCatching { repository.deleteVisibleNetwork(accessPoint) }
+            .onSuccess { removedCount ->
+                dismissDetails()
+                scanStatus.value = if (removedCount == 1) {
+                    "Deleted ${accessPoint.ssid} and its local observation history. A later scan can add it again."
+                } else {
+                    "Deleted $removedCount saved access points named ${accessPoint.ssid}. A later scan can add them again."
+                }
+            }
+            .onFailure { error ->
+                scanStatus.value = "Could not delete ${accessPoint.ssid}: ${error.message ?: "database error"}"
+            }
     }
 
     private suspend fun scanOnce(locationProvider: suspend () -> Location?, showStatus: Boolean): Boolean? {

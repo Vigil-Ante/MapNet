@@ -80,6 +80,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.room.Room
+import com.mapnet.connection.WifiConnectionAction
 import com.mapnet.connection.WifiConnectionRequester
 import com.mapnet.connection.canConnectWithMapNet
 import com.mapnet.connection.needsPassphrase
@@ -134,6 +135,7 @@ private fun MapNetApp(
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val filter by viewModel.filter.collectAsStateWithLifecycle()
+    val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
     val filteredAccessPoints by viewModel.filteredAccessPoints.collectAsStateWithLifecycle()
     val summary by viewModel.summary.collectAsStateWithLifecycle()
     val selectedAp by viewModel.selectedAccessPoint.collectAsStateWithLifecycle()
@@ -147,6 +149,11 @@ private fun MapNetApp(
     var connectionStatus by remember { androidx.compose.runtime.mutableStateOf<String?>(null) }
     var screen = remember { androidx.compose.runtime.mutableStateOf(MapNetScreen.SURVEY) }
     var startContinuousAfterPermission by rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+    val addNetworkLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        connectionStatus = WifiConnectionRequester.addNetworkResultMessage(result.resultCode, result.data)
+    }
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { granted ->
@@ -223,11 +230,13 @@ private fun MapNetApp(
                 MapNetScreen.SURVEY -> SurveyScreen(
                     modifier = Modifier.padding(padding),
                     filter = filter,
+                    searchQuery = searchQuery,
                     summary = summary,
                     accessPoints = filteredAccessPoints,
                     isScanning = isScanning,
                     isContinuousScanning = isContinuousScanning,
                     onFilter = viewModel::selectFilter,
+                    onSearchQuery = viewModel::setSearchQuery,
                     onOpenOnly = { viewModel.selectFilter(SecurityFilter.OPEN) },
                     onScan = {
                         if (context.hasSurveyPermission()) viewModel.performScan { context.currentSurveyLocation() }
@@ -267,8 +276,12 @@ private fun MapNetApp(
                 history = history,
                 hasSecurityChange = history.any { it.securityType != ap.securityType },
                 onConnect = { passphrase ->
-                    connectionStatus = WifiConnectionRequester(context).requestConnection(ap, passphrase)
+                    when (val action = WifiConnectionRequester(context).requestConnection(ap, passphrase)) {
+                        is WifiConnectionAction.LaunchAddNetworkConfirmation -> addNetworkLauncher.launch(action.intent)
+                        is WifiConnectionAction.ShowMessage -> connectionStatus = action.message
+                    }
                 },
+                onDelete = { viewModel.deleteAccessPoint(ap) },
                 onDismiss = viewModel::dismissDetails
             )
         }
@@ -394,11 +407,13 @@ private fun UpdateDialog(
 private fun SurveyScreen(
     modifier: Modifier,
     filter: SecurityFilter,
+    searchQuery: String,
     summary: SecuritySummary,
     accessPoints: List<AccessPointEntity>,
     isScanning: Boolean,
     isContinuousScanning: Boolean,
     onFilter: (SecurityFilter) -> Unit,
+    onSearchQuery: (String) -> Unit,
     onOpenOnly: () -> Unit,
     onScan: () -> Unit,
     onToggleContinuousScan: () -> Unit,
@@ -435,10 +450,17 @@ private fun SurveyScreen(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
             )
         }
+        OutlinedTextField(
+            value = searchQuery,
+            onValueChange = onSearchQuery,
+            label = { Text("Search Wi-Fi name or BSSID") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
+        )
         SecuritySummaryCard(summary, onOpenOnly)
         SecurityFilterBar(filter, onFilter)
         if (accessPoints.isEmpty()) {
-            EmptySurveyState()
+            EmptySurveyState(searchQuery)
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
@@ -493,10 +515,15 @@ private fun SecurityFilterBar(filter: SecurityFilter, onFilter: (SecurityFilter)
 }
 
 @Composable
-private fun EmptySurveyState() = Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
+private fun EmptySurveyState(searchQuery: String) = Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text("No access points recorded", style = MaterialTheme.typography.titleMedium)
-        Text("Start a scan to build the local survey database.", style = MaterialTheme.typography.bodyMedium)
+        if (searchQuery.isBlank()) {
+            Text("No access points recorded", style = MaterialTheme.typography.titleMedium)
+            Text("Start a scan to build the local survey database.", style = MaterialTheme.typography.bodyMedium)
+        } else {
+            Text("No networks match your search", style = MaterialTheme.typography.titleMedium)
+            Text("Try a different Wi-Fi name or BSSID.", style = MaterialTheme.typography.bodyMedium)
+        }
     }
 }
 
@@ -634,18 +661,41 @@ private fun AccessPointDetailDialog(
     history: List<ObservationEntity>,
     hasSecurityChange: Boolean,
     onConnect: (String) -> Unit,
+    onDelete: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val supportsDirectConnection = accessPoint.securityType.canConnectWithMapNet() && accessPoint.ssid != "<Hidden SSID>"
     val needsPassphrase = supportsDirectConnection && accessPoint.securityType.needsPassphrase()
     var passphrase by rememberSaveable(accessPoint.bssid) { androidx.compose.runtime.mutableStateOf("") }
+    var showDeleteConfirmation by rememberSaveable(accessPoint.bssid) { androidx.compose.runtime.mutableStateOf(false) }
+    if (showDeleteConfirmation) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirmation = false },
+            title = { Text("Delete ${accessPoint.ssid}?") },
+            text = {
+                Text(
+                    "This removes the visible network and its local observation history. A later scan can add it again."
+                )
+            },
+            confirmButton = {
+                Button(onClick = onDelete) { Text("Delete") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirmation = false }) { Text("Cancel") }
+            }
+        )
+        return
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = {
+            Button(onClick = { onConnect(passphrase) }) {
+                Text(if (supportsDirectConnection) "Connect" else "Wi-Fi settings")
+            }
+        },
+        dismissButton = {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { onConnect(passphrase) }) {
-                    Text(if (supportsDirectConnection) "Connect" else "Wi-Fi settings")
-                }
+                TextButton(onClick = { showDeleteConfirmation = true }) { Text("Delete") }
                 TextButton(onClick = onDismiss) { Text("Done") }
             }
         },
@@ -675,7 +725,7 @@ private fun AccessPointDetailDialog(
                 } else if (!supportsDirectConnection) {
                     Text("This security type needs Android Wi-Fi settings for its full connection configuration.", style = MaterialTheme.typography.bodySmall)
                 } else {
-                    Text("Connect sends this access point to Android for approval.", style = MaterialTheme.typography.bodySmall)
+                    Text("Connect opens Android's confirmation screen to add this network to your saved Wi-Fi networks.", style = MaterialTheme.typography.bodySmall)
                 }
                 if (history.isNotEmpty()) {
                     Text("OBSERVATIONS", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 8.dp))

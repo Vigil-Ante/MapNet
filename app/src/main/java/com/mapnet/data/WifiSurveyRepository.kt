@@ -32,6 +32,16 @@ class WifiSurveyRepository(
     fun observeHistory(bssid: String): Flow<List<ObservationEntity>> =
         database.accessPointDao().observeHistory(bssid)
 
+    /** Removes the visible network and all of its locally stored observations. */
+    suspend fun deleteVisibleNetwork(accessPoint: AccessPointEntity): Int = database.withTransaction {
+        val dao = database.accessPointDao()
+        if (accessPoint.ssid.isHiddenNetworkName()) {
+            dao.deleteByBssid(accessPoint.bssid)
+        } else {
+            dao.deleteByNetworkName(accessPoint.ssid)
+        }
+    }
+
     /** Starts a platform scan and saves every returned BSSID as an individual AP. */
     @SuppressLint("MissingPermission")
     suspend fun scanAndPersist(location: Location?): WifiScanOutcome {
@@ -137,3 +147,6 @@ private fun Int.toWifiChannel(): Int? = when {
     this in 5955..7115 -> (this - 5950) / 5
     else -> null
 }
+
+private fun String.isHiddenNetworkName(): Boolean =
+    trim().equals("<Hidden SSID>", ignoreCase = true) || isBlank()
