@@ -43,8 +43,11 @@ jobs:
           MAPNET_UPDATE_MANIFEST_URL: https://github.com/${{ github.repository }}/releases/latest/download/mapnet-update.json
         run: |
           set -euo pipefail
-          test -n "$MAPNET_GOOGLE_MAPS_API_KEY"
-          printf 'MAPS_API_KEY=%s\n' "$MAPNET_GOOGLE_MAPS_API_KEY" > secrets.properties
+          if [ -n "${MAPNET_GOOGLE_MAPS_API_KEY:-}" ]; then
+            printf 'MAPS_API_KEY=%s\n' "$MAPNET_GOOGLE_MAPS_API_KEY" > secrets.properties
+          else
+            echo "Google Maps is disabled for this release because MAPNET_GOOGLE_MAPS_API_KEY is not configured."
+          fi
           VERSION_CODE=$((100000 + GITHUB_RUN_NUMBER))
           VERSION_NAME="${GITHUB_REF_NAME#v}"
           bash gradlew testDebugUnitTest assembleRelease \

@@ -65,7 +65,7 @@ The first release APK must still be installed manually. Once that signed release
    - `MAPNET_RELEASE_STORE_PASSWORD`
    - `MAPNET_RELEASE_KEY_ALIAS`
    - `MAPNET_RELEASE_KEY_PASSWORD`
-   - `MAPNET_GOOGLE_MAPS_API_KEY` — the Android-restricted Google Maps key described above. The release workflow fails deliberately without it, preventing publication of a build with a non-working map.
+   - `MAPNET_GOOGLE_MAPS_API_KEY` *(optional)* — the Android-restricted Google Maps key described above. Without it, releases still publish but Google Maps is disabled and the app directs the user to Settings for setup.
 
 4. Commit the generated Gradle Wrapper and the workflow in `.github/workflows/release.yml`, then push a tag such as `v0.2.0`.
 

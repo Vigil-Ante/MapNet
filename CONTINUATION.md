@@ -52,7 +52,7 @@ The Google Maps Android key is intentionally not in Git. The project applies the
 
 Before device testing or release builds, enable **Maps SDK for Android** in a billed Google Cloud project. Restrict the key to Android package `com.mapnet` and add the SHA-1 fingerprints for every signing certificate used to install MapNet (at least the persistent release key; add debug only for debug-device testing). Do not add the key to `local.defaults.properties`, `update.properties`, GitHub source, or an APK release secret without Android application restrictions.
 
-The release workflow requires a repository Actions secret named `MAPNET_GOOGLE_MAPS_API_KEY`. It writes the value to an ignored `secrets.properties` file only on the GitHub runner; the workflow fails if that secret is absent so a release cannot accidentally contain the non-working placeholder key.
+The release workflow optionally reads a repository Actions secret named `MAPNET_GOOGLE_MAPS_API_KEY`. When present, it writes the value to an ignored `secrets.properties` file only on the GitHub runner. When absent, the release still publishes with the `MAPS_API_KEY_NOT_CONFIGURED` placeholder and the in-app map remains disabled until a later release is built with a restricted key.
 
 GitHub Actions runs: <https://github.com/Vigil-Ante/MapNet/actions>
 
