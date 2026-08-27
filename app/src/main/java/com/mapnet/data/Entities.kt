@@ -45,5 +45,11 @@ data class ObservationEntity(
     val isEncrypted: Boolean,
     val securityCapabilities: String,
     val latitude: Double?,
-    val longitude: Double?
+    val longitude: Double?,
+    /** Radius in metres at the location provider's reported confidence level. */
+    val locationAccuracyMeters: Float?,
+    /** Android location provider used for this survey coordinate, when known. */
+    val locationProvider: String?,
+    /** Timestamp of the coordinate itself; separate from the Wi-Fi scan timestamp. */
+    val locationTimestampEpochMs: Long?
 )

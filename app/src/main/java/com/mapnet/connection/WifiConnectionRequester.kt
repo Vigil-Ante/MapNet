@@ -1,7 +1,6 @@
 package com.mapnet.connection
 
 import android.annotation.SuppressLint
-import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.net.ConnectivityManager
@@ -9,35 +8,28 @@ import android.net.MacAddress
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
-import android.net.wifi.WifiNetworkSuggestion
 import android.net.wifi.WifiNetworkSpecifier
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
-import androidx.annotation.RequiresApi
 import com.mapnet.data.AccessPointEntity
 import com.mapnet.security.WifiSecurityType
 
 sealed interface WifiConnectionAction {
-    data class LaunchAddNetworkConfirmation(val intent: Intent) : WifiConnectionAction
+    data class RequestNetworkConnection(
+        val accessPoint: AccessPointEntity,
+        val passphrase: String
+    ) : WifiConnectionAction
     data class ShowMessage(val message: String) : WifiConnectionAction
-}
-
-sealed interface WifiNetworkAddResult {
-    data object Saved : WifiNetworkAddResult
-    data object AlreadySaved : WifiNetworkAddResult
-    data object Rejected : WifiNetworkAddResult
-    data object Failed : WifiNetworkAddResult
 }
 
 /**
  * Builds Android-approved requests for a surveyed access point.
  *
- * New networks are added to Android's saved-network list. Android intentionally performs no
- * connection action when the exact configuration already exists, so that case is followed by a
- * Wi-Fi Network Request. The latter prompts the user and establishes the requested connection
- * for MapNet without giving the app authority to silently switch the whole device.
+ * A Wi-Fi Network Request prompts the user and connects MapNet to the selected network without
+ * saving it as a device-wide network. Android reserves permanent, device-wide Wi-Fi changes for
+ * the system Wi-Fi UI.
  */
 class WifiConnectionRequester(private val context: Context) {
     @SuppressLint("MissingPermission")
@@ -47,9 +39,9 @@ class WifiConnectionRequester(private val context: Context) {
                 openWifiSettings("Hidden networks need to be selected in Android Wi-Fi settings.")
             )
         }
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
             return WifiConnectionAction.ShowMessage(
-                openWifiSettings("Android 11 or newer is needed for the in-app confirmation screen. Choose this network in Wi-Fi settings.")
+                openWifiSettings("Android 10 or newer is needed for the in-app connection prompt. Choose this network in Wi-Fi settings.")
             )
         }
         if (!accessPoint.securityType.canConnectWithMapNet()) {
@@ -61,27 +53,21 @@ class WifiConnectionRequester(private val context: Context) {
             return WifiConnectionAction.ShowMessage("Enter the Wi-Fi password before connecting.")
         }
 
-        return runCatching {
-            WifiConnectionAction.LaunchAddNetworkConfirmation(buildAddNetworkIntent(accessPoint, passphrase))
-        }.getOrElse { error ->
-            WifiConnectionAction.ShowMessage(
-                "Android could not prepare this network: ${error.message ?: "invalid network details"}"
-            )
-        }
+        return WifiConnectionAction.RequestNetworkConnection(accessPoint, passphrase)
     }
 
     /**
-     * Requests the Android connection prompt after the add-network screen reports an existing
-     * saved configuration. The connection remains requested only while MapNet is alive.
+     * Requests Android's connection prompt. The connection remains requested only while MapNet
+     * is alive and is not added to Android's saved-network list.
      */
     @SuppressLint("MissingPermission")
-    fun requestSavedNetworkConnection(
+    fun requestNetworkConnection(
         accessPoint: AccessPointEntity,
         passphrase: String,
         onStatus: (String) -> Unit
     ): String {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-            return openWifiSettings("Choose this saved network in Android Wi-Fi settings.")
+            return openWifiSettings("Choose this network in Android Wi-Fi settings.")
         }
         if (!accessPoint.securityType.canConnectWithMapNet()) {
             return openWifiSettings("This network type needs Android Wi-Fi settings for its full configuration.")
@@ -92,6 +78,7 @@ class WifiConnectionRequester(private val context: Context) {
             val connectivityManager = context.getSystemService(ConnectivityManager::class.java)
             val request = NetworkRequest.Builder()
                 .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+                .removeCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
                 .setNetworkSpecifier(buildNetworkSpecifier(accessPoint, passphrase))
                 .build()
             val callback = connectionCallback(
@@ -119,29 +106,6 @@ class WifiConnectionRequester(private val context: Context) {
         }
     }
 
-    @RequiresApi(Build.VERSION_CODES.R)
-    private fun buildAddNetworkIntent(accessPoint: AccessPointEntity, passphrase: String): Intent {
-        val builder = WifiNetworkSuggestion.Builder().setSsid(accessPoint.ssid)
-        accessPoint.bssidAsMacAddress()?.let(builder::setBssid)
-
-        when (accessPoint.securityType) {
-            WifiSecurityType.WPA,
-            WifiSecurityType.WPA2,
-            WifiSecurityType.WPA2_WPA3_TRANSITION -> builder.setWpa2Passphrase(passphrase)
-            WifiSecurityType.WPA3 -> builder.setWpa3Passphrase(passphrase)
-            WifiSecurityType.OPEN -> Unit
-            else -> error("Unsupported security type")
-        }
-
-        return Intent(Settings.ACTION_WIFI_ADD_NETWORKS).apply {
-            putParcelableArrayListExtra(
-                Settings.EXTRA_WIFI_NETWORK_LIST,
-                arrayListOf(builder.build())
-            )
-        }
-    }
-
-    @RequiresApi(Build.VERSION_CODES.Q)
     private fun buildNetworkSpecifier(accessPoint: AccessPointEntity, passphrase: String): WifiNetworkSpecifier {
         val builder = WifiNetworkSpecifier.Builder().setSsid(accessPoint.ssid)
         accessPoint.bssidAsMacAddress()?.let(builder::setBssid)
@@ -196,23 +160,8 @@ class WifiConnectionRequester(private val context: Context) {
         return message
     }
 
-    companion object {
-        fun addNetworkResult(resultCode: Int, data: Intent?): WifiNetworkAddResult {
-            if (resultCode != Activity.RESULT_OK) {
-                return WifiNetworkAddResult.Rejected
-            }
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
-                return WifiNetworkAddResult.Saved
-            }
-            return when (data?.getIntegerArrayListExtra(Settings.EXTRA_WIFI_NETWORK_RESULT_LIST)?.firstOrNull()) {
-                Settings.ADD_WIFI_RESULT_SUCCESS -> WifiNetworkAddResult.Saved
-                Settings.ADD_WIFI_RESULT_ALREADY_EXISTS -> WifiNetworkAddResult.AlreadySaved
-                Settings.ADD_WIFI_RESULT_ADD_OR_UPDATE_FAILED -> WifiNetworkAddResult.Failed
-                else -> WifiNetworkAddResult.Saved
-            }
-        }
-
-        private const val CONNECTION_REQUEST_TIMEOUT_MS = 20_000
+    private companion object {
+        const val CONNECTION_REQUEST_TIMEOUT_MS = 20_000
     }
 
     private var activeNetworkCallback: ConnectivityManager.NetworkCallback? = null

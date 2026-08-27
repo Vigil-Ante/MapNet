@@ -1,6 +1,7 @@
 package com.mapnet.survey
 
 import com.mapnet.data.AccessPointEntity
+import com.mapnet.data.ObservationEntity
 import com.mapnet.security.WifiSecurityType
 
 enum class SecurityFilter(val label: String) {
@@ -15,21 +16,30 @@ enum class SecurityFilter(val label: String) {
     OWE("OWE")
 }
 
-fun SecurityFilter.includes(ap: AccessPointEntity): Boolean = when (this) {
+fun SecurityFilter.includes(ap: AccessPointEntity): Boolean = includes(ap.securityType)
+
+fun SecurityFilter.includes(securityType: WifiSecurityType): Boolean = when (this) {
     SecurityFilter.ALL -> true
-    SecurityFilter.OPEN -> ap.securityType == WifiSecurityType.OPEN
-    SecurityFilter.SECURED -> ap.securityType != WifiSecurityType.OPEN
-    SecurityFilter.WEP -> ap.securityType == WifiSecurityType.WEP
-    SecurityFilter.WPA -> ap.securityType == WifiSecurityType.WPA
-    SecurityFilter.WPA2 -> ap.securityType == WifiSecurityType.WPA2 ||
-        ap.securityType == WifiSecurityType.WPA2_WPA3_TRANSITION
-    SecurityFilter.WPA3 -> ap.securityType == WifiSecurityType.WPA3 ||
-        ap.securityType == WifiSecurityType.WPA2_WPA3_TRANSITION
-    SecurityFilter.ENTERPRISE -> ap.securityType == WifiSecurityType.ENTERPRISE
-    SecurityFilter.OWE -> ap.securityType == WifiSecurityType.OWE
+    SecurityFilter.OPEN -> securityType == WifiSecurityType.OPEN
+    SecurityFilter.SECURED -> securityType != WifiSecurityType.OPEN
+    SecurityFilter.WEP -> securityType == WifiSecurityType.WEP
+    SecurityFilter.WPA -> securityType == WifiSecurityType.WPA
+    SecurityFilter.WPA2 -> securityType == WifiSecurityType.WPA2 ||
+        securityType == WifiSecurityType.WPA2_WPA3_TRANSITION
+    SecurityFilter.WPA3 -> securityType == WifiSecurityType.WPA3 ||
+        securityType == WifiSecurityType.WPA2_WPA3_TRANSITION
+    SecurityFilter.ENTERPRISE -> securityType == WifiSecurityType.ENTERPRISE
+    SecurityFilter.OWE -> securityType == WifiSecurityType.OWE
 }
 
 fun AccessPointEntity.matchesSearch(query: String): Boolean {
+    val normalizedQuery = query.trim()
+    return normalizedQuery.isBlank() ||
+        ssid.contains(normalizedQuery, ignoreCase = true) ||
+        bssid.contains(normalizedQuery, ignoreCase = true)
+}
+
+fun ObservationEntity.matchesSearch(query: String): Boolean {
     val normalizedQuery = query.trim()
     return normalizedQuery.isBlank() ||
         ssid.contains(normalizedQuery, ignoreCase = true) ||

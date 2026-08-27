@@ -32,6 +32,11 @@ class WifiSurveyRepository(
     fun observeHistory(bssid: String): Flow<List<ObservationEntity>> =
         database.accessPointDao().observeHistory(bssid)
 
+    /** Individual, geolocated survey observations. These mark where the phone
+     * heard an AP, rather than claiming to know an AP's transmitter position. */
+    fun observeLocatedObservations(): Flow<List<ObservationEntity>> =
+        database.accessPointDao().observeLocatedObservations()
+
     /** Removes the visible network and all of its locally stored observations. */
     suspend fun deleteVisibleNetwork(accessPoint: AccessPointEntity): Int = database.withTransaction {
         val dao = database.accessPointDao()
@@ -90,7 +95,10 @@ class WifiSurveyRepository(
                     isEncrypted = profile.isEncrypted,
                     securityCapabilities = result.capabilities.orEmpty(),
                     latitude = location?.latitude,
-                    longitude = location?.longitude
+                    longitude = location?.longitude,
+                    locationAccuracyMeters = location?.takeIf { it.hasAccuracy() }?.accuracy,
+                    locationProvider = location?.provider,
+                    locationTimestampEpochMs = location?.time
                 )
             )
         }

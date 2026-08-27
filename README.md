@@ -7,14 +7,18 @@ MapNet is a local-first Android Wi-Fi survey MVP. It retains each BSSID as a loc
 1. Run a Wi-Fi survey, or enable **Continuous scan** to request the next scan automatically while MapNet is open (Android requires location and nearby-Wi-Fi permission). Search the visible list by Wi-Fi name or BSSID.
 2. Save the observed APs and raw capabilities to a local Room database.
 3. Flag traditional open networks with an accessible `⚠ OPEN` label.
-4. Filter the list and the survey map together by security type.
+4. Filter the list and the Google Maps survey view together by security type.
 5. Inspect an AP’s normalized security details and observations count, or delete the local network record and its local history. A later scan can rediscover a deleted network.
-6. On Android 11 or newer, request Android's explicit confirmation to add supported open and personal WPA networks as a normal saved Wi-Fi network. If Android reports that the network is already saved, MapNet follows with Android's user-approved connection prompt for that network. Enterprise, legacy, hidden, and Android 10 configurations open Wi-Fi Settings instead.
-7. Inspect the active Wi-Fi connection’s IP details, run Ping, and run a local traceroute from the Tools tab.
+6. On Android 10 or newer, request Android's explicit confirmation to connect MapNet to supported open and personal WPA networks without saving them as a device-wide Wi-Fi network. Enterprise, legacy, hidden, and older Android configurations open Wi-Fi Settings instead.
+7. Inspect the active Wi-Fi connection’s IP details, run Ping and a local traceroute, and map reachable devices on the current private Wi-Fi subnet from the Tools tab.
 
 Continuous scan requests a normal scan roughly every 30 seconds. When Android declines a request because of its system-level Wi-Fi scan throttle, MapNet retries every five seconds until Android accepts one; Android does not expose an exact throttle-expiry notification.
 
 `OWE / Enhanced Open` is deliberately shown as passwordless **and encrypted**, rather than as a traditional open network.
+
+## Local network mapping
+
+**Map local devices** sends one ICMP echo request to each usable address on the currently connected private IPv4 Wi-Fi subnet (up to 510 addresses), then combines responses with the device's local ARP table and configured gateway. It does not scan the public internet or devices on another subnet. Devices that block ping, do not appear in the ARP table, or are separated by guest-network/client isolation cannot be detected.
 
 ## Build
 
@@ -26,9 +30,19 @@ Gradle 8.7 and Temurin JDK 17 are supplied locally in `.tools`. For a command-li
 .\mapnet-gradle.bat testDebugUnitTest
 ```
 
-## Current boundary
+## Google Maps survey view
 
-The map is a local coordinate plot of observations, with no external map provider or API key. It uses the exact selected security filter, including `Open`, so field data can be reviewed without transmitting survey records to a third party.
+MapNet's map displays **survey positions**: where the phone heard Wi-Fi radios. A Wi-Fi scan cannot determine a transmitter's physical position, so it never represents the displayed pin as an AP location. Each pin summarizes the BSSIDs observed in one scan; its blue circle is the Android location provider's reported location-accuracy radius. Historical records created before this version remain visible but show that their accuracy is unavailable.
+
+The map uses Google Maps. Before running it on a phone:
+
+1. Create or select a Google Cloud project with billing enabled, then enable **Maps SDK for Android**.
+2. Create an Android-restricted API key for package `com.mapnet`, adding the SHA-1 certificate fingerprints for the debug and/or persistent release signing key that will install the app.
+3. Copy `secrets.properties.example` to ignored `secrets.properties` and set `MAPS_API_KEY` to that key. Never commit this file or an unrestricted key.
+
+The Gradle Secrets Plugin supplies this value to the Android manifest. `local.defaults.properties` carries only a non-working placeholder so a source-only checkout can compile without exposing a key.
+
+The app's **Settings** tab reports whether the installed APK includes a key, whether Google Play services are available, and the exact package/SHA-1 restriction values for that APK. It also has a temporary key-entry field that copies `MAPS_API_KEY=...` for `secrets.properties`. Google Maps reads this setting from the manifest at build time, so entering a key on the phone cannot alter the installed APK; rebuild and install after changing it.
 
 ## GitHub Release updates
 
@@ -51,6 +65,7 @@ The first release APK must still be installed manually. Once that signed release
    - `MAPNET_RELEASE_STORE_PASSWORD`
    - `MAPNET_RELEASE_KEY_ALIAS`
    - `MAPNET_RELEASE_KEY_PASSWORD`
+   - `MAPNET_GOOGLE_MAPS_API_KEY` — the Android-restricted Google Maps key described above. The release workflow fails deliberately without it, preventing publication of a build with a non-working map.
 
 4. Commit the generated Gradle Wrapper and the workflow in `.github/workflows/release.yml`, then push a tag such as `v0.2.0`.
 

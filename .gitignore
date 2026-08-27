@@ -4,6 +4,7 @@
 .kotlin/
 .idea/
 local.properties
+secrets.properties
 update.properties
 signing.properties
 *.jks

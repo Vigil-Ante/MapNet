@@ -39,9 +39,12 @@ jobs:
           MAPNET_RELEASE_STORE_PASSWORD: ${{ secrets.MAPNET_RELEASE_STORE_PASSWORD }}
           MAPNET_RELEASE_KEY_ALIAS: ${{ secrets.MAPNET_RELEASE_KEY_ALIAS }}
           MAPNET_RELEASE_KEY_PASSWORD: ${{ secrets.MAPNET_RELEASE_KEY_PASSWORD }}
+          MAPNET_GOOGLE_MAPS_API_KEY: ${{ secrets.MAPNET_GOOGLE_MAPS_API_KEY }}
           MAPNET_UPDATE_MANIFEST_URL: https://github.com/${{ github.repository }}/releases/latest/download/mapnet-update.json
         run: |
           set -euo pipefail
+          test -n "$MAPNET_GOOGLE_MAPS_API_KEY"
+          printf 'MAPS_API_KEY=%s\n' "$MAPNET_GOOGLE_MAPS_API_KEY" > secrets.properties
           VERSION_CODE=$((100000 + GITHUB_RUN_NUMBER))
           VERSION_NAME="${GITHUB_REF_NAME#v}"
           bash gradlew testDebugUnitTest assembleRelease \

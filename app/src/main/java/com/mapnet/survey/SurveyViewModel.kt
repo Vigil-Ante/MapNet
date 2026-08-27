@@ -38,11 +38,20 @@ class SurveyViewModel(private val repository: WifiSurveyRepository) : ViewModel(
     val status: StateFlow<String?> = scanStatus
     private val rawAccessPoints = repository.observeAccessPoints()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    private val rawLocatedObservations = repository.observeLocatedObservations()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val accessPoints = rawAccessPoints.map { it.collapseByNetworkName() }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val filteredAccessPoints = combine(accessPoints, selectedFilter, search) { accessPoints, filter, query ->
         accessPoints.filter { accessPoint ->
             filter.includes(accessPoint) && accessPoint.matchesSearch(query)
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    /** Historical observations used by the map. These are deliberately not
+     * collapsed by SSID because a single map marker summarizes a survey event. */
+    val mapObservations = combine(rawLocatedObservations, selectedFilter, search) { observations, filter, query ->
+        observations.filter { observation ->
+            filter.includes(observation.securityType) && observation.matchesSearch(query)
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val summary = accessPoints.map { it.securitySummary() }
