@@ -89,6 +89,81 @@ data class TcpPortScanResult(
     val openPorts: List<Int>
 )
 
+enum class ProblemCheckStatus {
+    PASSED,
+    FAILED,
+    UNKNOWN,
+    SKIPPED
+}
+
+enum class ProblemCheckId {
+    WIFI,
+    GATEWAY,
+    DNS,
+    INTERNET,
+    DEVICE
+}
+
+data class ProblemSolverCheck(
+    val id: ProblemCheckId,
+    val label: String,
+    val status: ProblemCheckStatus,
+    val detail: String
+)
+
+enum class ProblemDiagnosis(
+    val title: String,
+    val nextStep: String
+) {
+    NOT_ON_WIFI(
+        "Not connected to Wi-Fi",
+        "Connect this phone to the Wi-Fi network you want to diagnose, then run the solver again."
+    ),
+    ROUTER_UNREACHABLE(
+        "Your router is not responding",
+        "Move closer to the router, reconnect to Wi-Fi, then restart the router if it still does not respond."
+    ),
+    DNS_FAILURE(
+        "DNS is not working",
+        "Restart the router or check its DNS settings. The Wi-Fi link works, but website names could not be resolved."
+    ),
+    INTERNET_LIMITED(
+        "Internet connection is limited",
+        "Check your ISP connection or complete any sign-in page required by this Wi-Fi network."
+    ),
+    DEVICE_UNREACHABLE(
+        "The selected device is not responding",
+        "Check that the device is powered on and connected to this Wi-Fi network, then scan devices again."
+    ),
+    INCOMPLETE(
+        "Diagnosis incomplete",
+        "Review the technical results, reconnect to Wi-Fi if needed, and try again."
+    ),
+    ALL_CLEAR(
+        "No connection problem detected",
+        "The phone, router, DNS, internet, and selected device responded to these checks."
+    )
+}
+
+data class ProblemSolverResult(
+    val selectedDeviceName: String? = null,
+    val checks: List<ProblemSolverCheck>,
+    val diagnosis: ProblemDiagnosis
+)
+
+fun classifyProblem(checks: List<ProblemSolverCheck>): ProblemDiagnosis {
+    fun status(id: ProblemCheckId) = checks.firstOrNull { it.id == id }?.status
+    return when {
+        status(ProblemCheckId.WIFI) == ProblemCheckStatus.FAILED -> ProblemDiagnosis.NOT_ON_WIFI
+        status(ProblemCheckId.GATEWAY) == ProblemCheckStatus.FAILED -> ProblemDiagnosis.ROUTER_UNREACHABLE
+        status(ProblemCheckId.DNS) == ProblemCheckStatus.FAILED -> ProblemDiagnosis.DNS_FAILURE
+        status(ProblemCheckId.INTERNET) == ProblemCheckStatus.FAILED -> ProblemDiagnosis.INTERNET_LIMITED
+        status(ProblemCheckId.DEVICE) == ProblemCheckStatus.FAILED -> ProblemDiagnosis.DEVICE_UNREACHABLE
+        checks.any { it.status == ProblemCheckStatus.UNKNOWN } -> ProblemDiagnosis.INCOMPLETE
+        else -> ProblemDiagnosis.ALL_CLEAR
+    }
+}
+
 data class KnownLanNetwork(
     val id: String,
     val ssid: String,

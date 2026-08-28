@@ -13,8 +13,10 @@ import androidx.room.withTransaction
 import com.mapnet.security.WifiSecurityClassifier
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.resume
+import java.util.UUID
 
 data class WifiScanOutcome(
     val observationCount: Int,
@@ -37,10 +39,61 @@ class WifiSurveyRepository(
     fun observeLocatedObservations(): Flow<List<ObservationEntity>> =
         database.accessPointDao().observeLocatedObservations()
 
+    fun observeNetworkLists(): Flow<List<NetworkListEntity>> =
+        database.networkListDao().observeLists()
+
+    fun observeNetworkListMembers(): Flow<Map<String, Set<String>>> =
+        database.networkListDao().observeMembers().map { members ->
+            members.groupBy(NetworkListMemberEntity::listId) { it.networkKey }
+                .mapValues { (_, keys) -> keys.toSet() }
+        }
+
+    /** Creates a list unless one with the same name already exists. */
+    suspend fun createNetworkList(name: String): NetworkListEntity? = database.withTransaction {
+        val normalizedName = name.trim()
+        if (normalizedName.isBlank() || database.networkListDao().findByName(normalizedName) != null) {
+            return@withTransaction null
+        }
+        val list = NetworkListEntity(
+            id = UUID.randomUUID().toString(),
+            name = normalizedName,
+            createdAtEpochMs = System.currentTimeMillis()
+        )
+        database.networkListDao().insertList(list)
+        list
+    }
+
+    suspend fun addNetworksToList(listId: String, networkKeys: Set<String>) {
+        if (networkKeys.isEmpty()) return
+        database.networkListDao().insertMembers(
+            networkKeys.map { NetworkListMemberEntity(listId = listId, networkKey = it) }
+        )
+    }
+
+    suspend fun removeNetworksFromList(listId: String, networkKeys: Set<String>) {
+        if (networkKeys.isNotEmpty()) database.networkListDao().removeMembers(listId, networkKeys.toList())
+    }
+
+    /** Deletes the list and its memberships, but leaves saved survey data intact. */
+    suspend fun deleteNetworkList(listId: String) = database.networkListDao().deleteList(listId)
+
     /** Removes the visible network and all of its locally stored observations. */
     suspend fun deleteVisibleNetwork(accessPoint: AccessPointEntity): Int = database.withTransaction {
+        deleteVisibleNetworkInternal(accessPoint)
+    }
+
+    /** Removes several saved networks and their locally stored observations in one transaction. */
+    suspend fun deleteVisibleNetworks(accessPoints: Collection<AccessPointEntity>): Int = database.withTransaction {
+        accessPoints
+            .distinctBy(AccessPointEntity::networkListKey)
+            .fold(0) { removedCount, accessPoint ->
+                removedCount + deleteVisibleNetworkInternal(accessPoint)
+            }
+    }
+
+    private suspend fun deleteVisibleNetworkInternal(accessPoint: AccessPointEntity): Int {
         val dao = database.accessPointDao()
-        if (accessPoint.ssid.isHiddenNetworkName()) {
+        return if (accessPoint.ssid.isHiddenNetworkName()) {
             dao.deleteByBssid(accessPoint.bssid)
         } else {
             dao.deleteByNetworkName(accessPoint.ssid)

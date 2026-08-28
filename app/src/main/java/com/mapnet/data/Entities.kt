@@ -53,3 +53,41 @@ data class ObservationEntity(
     /** Timestamp of the coordinate itself; separate from the Wi-Fi scan timestamp. */
     val locationTimestampEpochMs: Long?
 )
+
+/** A user-created grouping for saved Wi-Fi networks. */
+@Entity(tableName = "network_lists")
+data class NetworkListEntity(
+    @PrimaryKey val id: String,
+    val name: String,
+    val createdAtEpochMs: Long
+)
+
+/**
+ * A list membership refers to a visible network (SSID), rather than one BSSID,
+ * so a network remains grouped even when the radio used to represent it changes.
+ */
+@Entity(
+    tableName = "network_list_members",
+    primaryKeys = ["listId", "networkKey"],
+    foreignKeys = [ForeignKey(
+        entity = NetworkListEntity::class,
+        parentColumns = ["id"],
+        childColumns = ["listId"],
+        onDelete = ForeignKey.CASCADE
+    )],
+    indices = [Index("listId"), Index("networkKey")]
+)
+data class NetworkListMemberEntity(
+    val listId: String,
+    val networkKey: String
+)
+
+/** Stable key for one row in the user-facing, SSID-grouped survey list. */
+fun AccessPointEntity.networkListKey(): String {
+    val normalizedName = ssid.trim()
+    return if (normalizedName.equals("<Hidden SSID>", ignoreCase = true) || normalizedName.isBlank()) {
+        "hidden:$bssid"
+    } else {
+        "ssid:${normalizedName.lowercase()}"
+    }
+}

@@ -1,12 +1,22 @@
 package com.mapnet.survey
 
 import com.mapnet.data.AccessPointEntity
+import com.mapnet.data.networkListKey
 import com.mapnet.security.WifiSecurityType
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class NetworkNameCollapseTest {
+
+    @Test
+    fun `network list key is case insensitive for visible SSIDs`() {
+        assertEquals(
+            "ssid:home wifi",
+            accessPoint("00:00:00:00:00:01", " Home WiFi ", 100, -50).networkListKey()
+        )
+    }
+
     @Test
     fun visibleNetworkNamesCollapseToTheirMostRecentObservation() {
         val older = accessPoint(bssid = "00:00:00:00:00:01", ssid = "Coffee Shop", seenAt = 100, signal = -40)

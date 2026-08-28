@@ -5,8 +5,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.mapnet.data.AccessPointEntity
+import com.mapnet.data.NetworkListEntity
 import com.mapnet.data.ObservationEntity
 import com.mapnet.data.WifiSurveyRepository
+import com.mapnet.data.networkListKey
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -25,6 +27,8 @@ import kotlinx.coroutines.CancellationException
 class SurveyViewModel(private val repository: WifiSurveyRepository) : ViewModel() {
     private val selectedFilter = MutableStateFlow(SecurityFilter.ALL)
     private val search = MutableStateFlow("")
+    private val selectedNetworkList = MutableStateFlow<String?>(null)
+    private val selectedNetworkKeySet = MutableStateFlow<Set<String>>(emptySet())
     private val selectedBssid = MutableStateFlow<String?>(null)
     private val scanning = MutableStateFlow(false)
     private val continuousScanning = MutableStateFlow(false)
@@ -33,6 +37,8 @@ class SurveyViewModel(private val repository: WifiSurveyRepository) : ViewModel(
 
     val filter: StateFlow<SecurityFilter> = selectedFilter
     val searchQuery: StateFlow<String> = search
+    val activeNetworkListId: StateFlow<String?> = selectedNetworkList
+    val selectedNetworkKeys: StateFlow<Set<String>> = selectedNetworkKeySet
     val isScanning: StateFlow<Boolean> = scanning
     val isContinuousScanning: StateFlow<Boolean> = continuousScanning
     val status: StateFlow<String?> = scanStatus
@@ -40,12 +46,24 @@ class SurveyViewModel(private val repository: WifiSurveyRepository) : ViewModel(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     private val rawLocatedObservations = repository.observeLocatedObservations()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val customNetworkLists: StateFlow<List<NetworkListEntity>> = repository.observeNetworkLists()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    private val networkListMembers = repository.observeNetworkListMembers()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
     val accessPoints = rawAccessPoints.map { it.collapseByNetworkName() }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-    val filteredAccessPoints = combine(accessPoints, selectedFilter, search) { accessPoints, filter, query ->
+    private val securityAndSearchAccessPoints = combine(accessPoints, selectedFilter, search) { accessPoints, filter, query ->
         accessPoints.filter { accessPoint ->
             filter.includes(accessPoint) && accessPoint.matchesSearch(query)
         }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val filteredAccessPoints = combine(
+        securityAndSearchAccessPoints,
+        selectedNetworkList,
+        networkListMembers
+    ) { accessPoints, listId, members ->
+        val keys = listId?.let(members::get)
+        if (keys == null) accessPoints else accessPoints.filter { it.networkListKey() in keys }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     /** Historical observations used by the map. These are deliberately not
      * collapsed by SSID because a single map marker summarizes a survey event. */
@@ -65,9 +83,92 @@ class SurveyViewModel(private val repository: WifiSurveyRepository) : ViewModel(
 
     fun selectFilter(filter: SecurityFilter) { selectedFilter.value = filter }
     fun setSearchQuery(query: String) { search.value = query }
+    fun selectNetworkList(listId: String?) {
+        selectedNetworkList.value = listId
+        clearNetworkSelection()
+    }
     fun showDetails(bssid: String) { selectedBssid.value = bssid }
     fun dismissDetails() { selectedBssid.value = null }
     fun clearStatus() { scanStatus.value = null }
+
+    fun toggleNetworkSelection(accessPoint: AccessPointEntity) {
+        val key = accessPoint.networkListKey()
+        selectedNetworkKeySet.value = selectedNetworkKeySet.value.toMutableSet().apply {
+            if (!add(key)) remove(key)
+        }
+    }
+
+    fun selectAllNetworks(accessPoints: List<AccessPointEntity>) {
+        selectedNetworkKeySet.value = accessPoints.map(AccessPointEntity::networkListKey).toSet()
+    }
+
+    fun clearNetworkSelection() { selectedNetworkKeySet.value = emptySet() }
+
+    fun createNetworkList(name: String) = viewModelScope.launch {
+        val created = repository.createNetworkList(name)
+        if (created == null) {
+            scanStatus.value = "Enter a unique name for the new list."
+        } else {
+            selectedNetworkList.value = created.id
+            scanStatus.value = "Created the ${created.name} list."
+        }
+    }
+
+    fun createListAndOrganizeSelected(name: String) = viewModelScope.launch {
+        val created = repository.createNetworkList(name)
+        if (created == null) {
+            scanStatus.value = "Enter a unique name for the new list."
+        } else {
+            repository.addNetworksToList(created.id, selectedNetworkKeySet.value)
+            selectedNetworkList.value = created.id
+            clearNetworkSelection()
+            scanStatus.value = "Created ${created.name} and added the selected networks."
+        }
+    }
+
+    fun addSelectedNetworksToList(listId: String) = viewModelScope.launch {
+        val count = selectedNetworkKeySet.value.size
+        repository.addNetworksToList(listId, selectedNetworkKeySet.value)
+        clearNetworkSelection()
+        scanStatus.value = "Added $count selected network${if (count == 1) "" else "s"} to the list."
+    }
+
+    fun removeSelectedNetworksFromActiveList() {
+        val listId = selectedNetworkList.value ?: return
+        viewModelScope.launch {
+            val count = selectedNetworkKeySet.value.size
+            repository.removeNetworksFromList(listId, selectedNetworkKeySet.value)
+            clearNetworkSelection()
+            scanStatus.value = "Removed $count network${if (count == 1) "" else "s"} from this list."
+        }
+    }
+
+    fun deleteActiveNetworkList() {
+        val listId = selectedNetworkList.value ?: return
+        viewModelScope.launch {
+            repository.deleteNetworkList(listId)
+            selectedNetworkList.value = null
+            clearNetworkSelection()
+            scanStatus.value = "Deleted the custom list. Saved networks were not deleted."
+        }
+    }
+
+    fun deleteSelectedNetworks() = viewModelScope.launch {
+        val keys = selectedNetworkKeySet.value
+        val toDelete = accessPoints.value.filter { it.networkListKey() in keys }
+        if (toDelete.isEmpty()) return@launch
+        runCatching { repository.deleteVisibleNetworks(toDelete) }
+            .onSuccess { removedCount ->
+                selectedBssid.value?.let { bssid ->
+                    if (toDelete.any { it.bssid == bssid }) dismissDetails()
+                }
+                clearNetworkSelection()
+                scanStatus.value = "Deleted $removedCount saved access point${if (removedCount == 1) "" else "s"} and their local observation history."
+            }
+            .onFailure { error ->
+                scanStatus.value = "Could not delete selected networks: ${error.message ?: "database error"}"
+            }
+    }
 
     fun performScan(locationProvider: suspend () -> Location?) {
         if (scanning.value || continuousScanning.value) return

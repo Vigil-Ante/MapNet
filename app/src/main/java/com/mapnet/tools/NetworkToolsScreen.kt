@@ -98,6 +98,7 @@ fun NetworkToolsScreen(
         ToolsRoute.INVENTORY -> DeviceInventoryScreen(modifier, state, viewModel)
         ToolsRoute.DEVICE_DETAIL -> DeviceDetailScreen(modifier, state, viewModel)
         ToolsRoute.MANUAL_DIAGNOSTICS -> ManualDiagnosticsScreen(modifier, state, viewModel)
+        ToolsRoute.PROBLEM_SOLVER -> ProblemSolverScreen(modifier, state, viewModel)
     }
 }
 
@@ -292,6 +293,15 @@ private fun NetworkSummaryCard(state: NetworkToolsUiState, viewModel: NetworkToo
                     Text("Manual tools")
                 }
             }
+            OutlinedButton(
+                onClick = viewModel::openProblemSolver,
+                modifier = Modifier.fillMaxWidth(),
+                enabled = connection != null && !state.isScanning
+            ) {
+                Icon(Icons.Default.NetworkCheck, contentDescription = null)
+                Spacer(Modifier.width(6.dp))
+                Text("Problem Solver")
+            }
         }
     }
 }
@@ -412,6 +422,7 @@ private fun DeviceDetailScreen(
                 onPing = viewModel::pingSelectedDevice,
                 onTraceroute = viewModel::tracerouteSelectedDevice,
                 onPorts = { showPortScan = true },
+                onProblemSolver = viewModel::openProblemSolverForSelectedDevice,
                 onCopy = { showCopy = true },
                 onOpenWeb = {
                     webUrl?.let { url ->
@@ -540,6 +551,7 @@ private fun DeviceActionGrid(
     onPing: () -> Unit,
     onTraceroute: () -> Unit,
     onPorts: () -> Unit,
+    onProblemSolver: () -> Unit,
     onCopy: () -> Unit,
     onOpenWeb: () -> Unit
 ) {
@@ -554,6 +566,11 @@ private fun DeviceActionGrid(
             DeviceActionButton("Copy address", Icons.Default.ContentCopy, true, onCopy, Modifier.weight(1f))
             DeviceActionButton("Web interface", Icons.Default.Http, hasWebUrl, onOpenWeb, Modifier.weight(1f))
             Spacer(Modifier.weight(1f))
+        }
+        OutlinedButton(onClick = onProblemSolver, enabled = diagnosticsEnabled, modifier = Modifier.fillMaxWidth()) {
+            Icon(Icons.Default.NetworkCheck, contentDescription = null)
+            Spacer(Modifier.width(6.dp))
+            Text("Problem Solver for this device")
         }
         if (!hasWebUrl) {
             Text(
@@ -805,6 +822,122 @@ private fun PortScanDialog(
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } }
     )
+}
+
+@Composable
+private fun ProblemSolverScreen(
+    modifier: Modifier,
+    state: NetworkToolsUiState,
+    viewModel: NetworkToolsViewModel
+) {
+    val solver = state.problemSolver
+    var deviceMenuExpanded by remember { mutableStateOf(false) }
+    Column(
+        modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Text("Problem Solver", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        Text(
+            "MapNet checks this phone, your router, DNS, internet access, and optionally a selected local device. Results stay on this phone.",
+            style = MaterialTheme.typography.bodySmall
+        )
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Optional device check", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(
+                        onClick = { deviceMenuExpanded = true },
+                        enabled = !solver.isRunning,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(solver.selectedDevice?.displayName ?: "No device selected")
+                    }
+                    DropdownMenu(expanded = deviceMenuExpanded, onDismissRequest = { deviceMenuExpanded = false }) {
+                        DropdownMenuItem(
+                            text = { Text("No device selected") },
+                            onClick = {
+                                viewModel.selectProblemSolverDevice(null)
+                                deviceMenuExpanded = false
+                            }
+                        )
+                        state.devices.sortedBy(KnownLanDevice::displayName).forEach { device ->
+                            DropdownMenuItem(
+                                text = { Text("${device.displayName} · ${device.ipAddress}") },
+                                onClick = {
+                                    viewModel.selectProblemSolverDevice(device.id)
+                                    deviceMenuExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+                Button(
+                    onClick = viewModel::runProblemSolver,
+                    enabled = !solver.isRunning && !state.isScanning,
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text(if (solver.result == null) "Run Problem Solver" else "Run again") }
+            }
+        }
+        if (solver.isRunning) {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Diagnosing connection…", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    solver.progressText?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                    TextButton(onClick = viewModel::cancelProblemSolver) { Text("Cancel") }
+                }
+            }
+        }
+        solver.result?.let { ProblemSolverResultCard(it) }
+        if (solver.result == null && !solver.isRunning) {
+            Text(
+                "This is a short, on-demand test. It does not run in the background or send your network inventory anywhere.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProblemSolverResultCard(result: ProblemSolverResult) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Likely cause", style = MaterialTheme.typography.labelLarge)
+            Text(result.diagnosis.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Text(result.diagnosis.nextStep, style = MaterialTheme.typography.bodyMedium)
+            HorizontalDivider()
+            Text("Technical results", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            result.checks.forEach { check ->
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        "${check.status.solverSymbol()} ${check.label}",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = check.status.solverColor()
+                    )
+                    Text(check.detail, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProblemCheckStatus.solverColor(): Color = when (this) {
+    ProblemCheckStatus.PASSED -> ONLINE_GREEN
+    ProblemCheckStatus.FAILED -> MaterialTheme.colorScheme.error
+    ProblemCheckStatus.UNKNOWN -> MaterialTheme.colorScheme.tertiary
+    ProblemCheckStatus.SKIPPED -> MaterialTheme.colorScheme.onSurfaceVariant
+}
+
+private fun ProblemCheckStatus.solverSymbol(): String = when (this) {
+    ProblemCheckStatus.PASSED -> "✓"
+    ProblemCheckStatus.FAILED -> "!"
+    ProblemCheckStatus.UNKNOWN -> "?"
+    ProblemCheckStatus.SKIPPED -> "–"
 }
 
 @Composable

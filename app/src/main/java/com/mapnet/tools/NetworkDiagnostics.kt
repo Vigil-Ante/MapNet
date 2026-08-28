@@ -18,9 +18,11 @@ import java.net.Inet4Address
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.net.URL
 import java.net.URI
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.TimeUnit
+import javax.net.ssl.HttpsURLConnection
 import kotlin.coroutines.resume
 import kotlin.random.Random
 import kotlinx.coroutines.Dispatchers
@@ -93,6 +95,91 @@ class NetworkDiagnostics(private val context: Context) {
                 if (output.contains("bytes from", ignoreCase = true)) break
             }
         }.trimEnd()
+    }
+
+    /**
+     * Runs a small, on-demand chain of probes. It only uses the active Wi-Fi
+     * network and does not save or upload the result.
+     */
+    suspend fun solveProblem(
+        selectedDevice: KnownLanDevice? = null,
+        onProgress: (String) -> Unit = {}
+    ): ProblemSolverResult = withContext(Dispatchers.IO) {
+        val checks = mutableListOf<ProblemSolverCheck>()
+        onProgress("Checking Wi-Fi connection…")
+        val connection = currentWifiDetails()
+        if (connection == null) {
+            checks += ProblemSolverCheck(
+                ProblemCheckId.WIFI,
+                "Wi-Fi connection",
+                ProblemCheckStatus.FAILED,
+                "This phone is not connected to an active Wi-Fi network."
+            )
+            return@withContext ProblemSolverResult(
+                selectedDeviceName = selectedDevice?.displayName,
+                checks = checks,
+                diagnosis = classifyProblem(checks)
+            )
+        }
+        checks += ProblemSolverCheck(
+            ProblemCheckId.WIFI,
+            "Wi-Fi connection",
+            ProblemCheckStatus.PASSED,
+            "Connected to ${connection.ssid}${connection.subnet?.let { " ($it)" }.orEmpty()}."
+        )
+
+        val gateway = connection.gateway
+        onProgress("Checking router…")
+        checks += if (gateway == null) {
+            ProblemSolverCheck(
+                ProblemCheckId.GATEWAY,
+                "Router reachability",
+                ProblemCheckStatus.UNKNOWN,
+                "Android did not provide a default gateway for this Wi-Fi connection."
+            )
+        } else if (respondsToPing(gateway)) {
+            ProblemSolverCheck(ProblemCheckId.GATEWAY, "Router reachability", ProblemCheckStatus.PASSED, "$gateway responded to a local ping.")
+        } else {
+            ProblemSolverCheck(ProblemCheckId.GATEWAY, "Router reachability", ProblemCheckStatus.FAILED, "$gateway did not respond to a local ping.")
+        }
+
+        onProgress("Checking DNS…")
+        val resolvedAddresses = runCatching {
+            InetAddress.getAllByName(PROBLEM_SOLVER_HOST).mapNotNull(InetAddress::getHostAddress)
+        }.getOrElse { emptyList() }
+        checks += if (resolvedAddresses.isEmpty()) {
+            ProblemSolverCheck(ProblemCheckId.DNS, "DNS lookup", ProblemCheckStatus.FAILED, "Could not resolve $PROBLEM_SOLVER_HOST using this network's DNS.")
+        } else {
+            ProblemSolverCheck(ProblemCheckId.DNS, "DNS lookup", ProblemCheckStatus.PASSED, "$PROBLEM_SOLVER_HOST resolved to ${resolvedAddresses.first()}.")
+        }
+
+        onProgress("Checking internet access…")
+        checks += if (resolvedAddresses.isEmpty()) {
+            ProblemSolverCheck(ProblemCheckId.INTERNET, "Internet access", ProblemCheckStatus.SKIPPED, "Skipped because DNS lookup did not succeed.")
+        } else {
+            val responseCode = runCatching { connectivityProbeResponseCode() }.getOrNull()
+            when {
+                responseCode == 204 -> ProblemSolverCheck(ProblemCheckId.INTERNET, "Internet access", ProblemCheckStatus.PASSED, "The minimal HTTPS connectivity probe returned HTTP 204.")
+                responseCode != null -> ProblemSolverCheck(ProblemCheckId.INTERNET, "Internet access", ProblemCheckStatus.FAILED, "The HTTPS connectivity probe returned HTTP $responseCode instead of 204.")
+                else -> ProblemSolverCheck(ProblemCheckId.INTERNET, "Internet access", ProblemCheckStatus.FAILED, "The HTTPS connectivity probe could not be reached.")
+            }
+        }
+
+        if (selectedDevice != null) {
+            onProgress("Checking ${selectedDevice.displayName}…")
+            checks += if (respondsToPing(selectedDevice.ipAddress)) {
+                ProblemSolverCheck(ProblemCheckId.DEVICE, "Selected device", ProblemCheckStatus.PASSED, "${selectedDevice.displayName} (${selectedDevice.ipAddress}) responded to a local ping.")
+            } else {
+                ProblemSolverCheck(ProblemCheckId.DEVICE, "Selected device", ProblemCheckStatus.FAILED, "${selectedDevice.displayName} (${selectedDevice.ipAddress}) did not respond to a local ping.")
+            }
+        } else {
+            checks += ProblemSolverCheck(ProblemCheckId.DEVICE, "Selected device", ProblemCheckStatus.SKIPPED, "No device was selected for this diagnosis.")
+        }
+        ProblemSolverResult(
+            selectedDeviceName = selectedDevice?.displayName,
+            checks = checks,
+            diagnosis = classifyProblem(checks)
+        )
     }
 
     /** Discovers and identifies devices only on the active private Wi-Fi IPv4 subnet. */
@@ -514,6 +601,20 @@ class NetworkDiagnostics(private val context: Context) {
             ?: activeNetwork?.takeIf { it.isWifi() }
     }
 
+    private fun connectivityProbeResponseCode(): Int {
+        val connection = (URL(PROBLEM_SOLVER_HTTPS_URL).openConnection() as HttpsURLConnection).apply {
+            connectTimeout = PROBLEM_SOLVER_TIMEOUT_MS
+            readTimeout = PROBLEM_SOLVER_TIMEOUT_MS
+            instanceFollowRedirects = false
+            useCaches = false
+        }
+        return try {
+            connection.responseCode
+        } finally {
+            connection.disconnect()
+        }
+    }
+
     private fun runCommand(command: List<String>, timeoutSeconds: Long): String = runCatching {
         val process = ProcessBuilder(command).redirectErrorStream(true).start()
         val completed = process.waitFor(timeoutSeconds, TimeUnit.SECONDS)
@@ -549,6 +650,9 @@ class NetworkDiagnostics(private val context: Context) {
         const val MAX_MDNS_SERVICES = 24
         const val NETBIOS_PORT = 137
         const val NETBIOS_TIMEOUT_MS = 450
+        const val PROBLEM_SOLVER_HOST = "connectivitycheck.gstatic.com"
+        const val PROBLEM_SOLVER_HTTPS_URL = "https://connectivitycheck.gstatic.com/generate_204"
+        const val PROBLEM_SOLVER_TIMEOUT_MS = 4_000
 
         val MDNS_SERVICE_TYPES = listOf(
             "_http._tcp.", "_https._tcp.", "_googlecast._tcp.", "_airplay._tcp.",

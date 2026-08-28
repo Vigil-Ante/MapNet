@@ -2,6 +2,7 @@ package com.mapnet.survey
 
 import com.mapnet.data.AccessPointEntity
 import com.mapnet.data.ObservationEntity
+import com.mapnet.data.networkListKey
 import com.mapnet.security.WifiSecurityType
 
 enum class SecurityFilter(val label: String) {
@@ -55,15 +56,7 @@ data class SecuritySummary(val total: Int, val open: Int) {
  * BSSID rows remain in Room so a later scan can still show observation history.
  */
 fun List<AccessPointEntity>.collapseByNetworkName(): List<AccessPointEntity> =
-    groupBy { accessPoint ->
-        val normalizedName = accessPoint.ssid.trim()
-        if (normalizedName.equals("<Hidden SSID>", ignoreCase = true) || normalizedName.isBlank()) {
-            // Hidden SSIDs have no stable name to merge on; retain each radio separately.
-            "hidden:${accessPoint.bssid}"
-        } else {
-            "ssid:$normalizedName"
-        }
-    }
+    groupBy(AccessPointEntity::networkListKey)
         .values
         .map { matchingAccessPoints ->
             matchingAccessPoints.maxWithOrNull(

@@ -15,7 +15,8 @@ import kotlinx.coroutines.launch
 enum class ToolsRoute {
     INVENTORY,
     DEVICE_DETAIL,
-    MANUAL_DIAGNOSTICS
+    MANUAL_DIAGNOSTICS,
+    PROBLEM_SOLVER
 }
 
 data class DiagnosticUiState(
@@ -23,6 +24,13 @@ data class DiagnosticUiState(
     val isRunning: Boolean = false,
     val progressText: String? = null,
     val output: String? = null
+)
+
+data class ProblemSolverUiState(
+    val selectedDevice: KnownLanDevice? = null,
+    val isRunning: Boolean = false,
+    val progressText: String? = null,
+    val result: ProblemSolverResult? = null
 )
 
 data class NetworkToolsUiState(
@@ -39,7 +47,8 @@ data class NetworkToolsUiState(
     val selectedDevice: KnownLanDevice? = null,
     val selectedEvents: List<LanDeviceEvent> = emptyList(),
     val selectedServices: List<LanService> = emptyList(),
-    val diagnostic: DiagnosticUiState = DiagnosticUiState()
+    val diagnostic: DiagnosticUiState = DiagnosticUiState(),
+    val problemSolver: ProblemSolverUiState = ProblemSolverUiState()
 ) {
     val visibleDevices: List<KnownLanDevice>
         get() = devices.filterAndSortDevices(searchQuery, filter, sort)
@@ -63,6 +72,7 @@ class NetworkToolsViewModel(
     private var detailJob: Job? = null
     private var scanJob: Job? = null
     private var diagnosticJob: Job? = null
+    private var problemSolverJob: Job? = null
     private var boundNetworkId: String? = null
 
     init {
@@ -100,6 +110,7 @@ class NetworkToolsViewModel(
     }
 
     fun openDevice(deviceId: String) {
+        problemSolverJob?.cancel()
         diagnosticJob?.cancel()
         _state.value = _state.value.copy(
             route = ToolsRoute.DEVICE_DETAIL,
@@ -111,6 +122,7 @@ class NetworkToolsViewModel(
     }
 
     fun openManualDiagnostics() {
+        problemSolverJob?.cancel()
         detailJob?.cancel()
         _state.value = _state.value.copy(
             route = ToolsRoute.MANUAL_DIAGNOSTICS,
@@ -121,15 +133,101 @@ class NetworkToolsViewModel(
         )
     }
 
+    fun openProblemSolver() {
+        detailJob?.cancel()
+        diagnosticJob?.cancel()
+        _state.value = _state.value.copy(
+            route = ToolsRoute.PROBLEM_SOLVER,
+            selectedDevice = null,
+            selectedEvents = emptyList(),
+            selectedServices = emptyList(),
+            diagnostic = DiagnosticUiState(),
+            problemSolver = ProblemSolverUiState()
+        )
+    }
+
+    fun openProblemSolverForSelectedDevice() {
+        val device = _state.value.selectedDevice ?: return
+        detailJob?.cancel()
+        diagnosticJob?.cancel()
+        _state.value = _state.value.copy(
+            route = ToolsRoute.PROBLEM_SOLVER,
+            selectedEvents = emptyList(),
+            selectedServices = emptyList(),
+            diagnostic = DiagnosticUiState(),
+            problemSolver = ProblemSolverUiState(selectedDevice = device)
+        )
+    }
+
+    fun selectProblemSolverDevice(deviceId: String?) {
+        val device = deviceId?.let { id -> _state.value.devices.firstOrNull { it.id == id } }
+        _state.value = _state.value.copy(
+            problemSolver = _state.value.problemSolver.copy(selectedDevice = device, result = null)
+        )
+    }
+
+    fun runProblemSolver() {
+        if (_state.value.isScanning || problemSolverJob?.isActive == true) return
+        diagnosticJob?.cancel()
+        val target = _state.value.problemSolver.selectedDevice
+        _state.value = _state.value.copy(
+            problemSolver = ProblemSolverUiState(selectedDevice = target, isRunning = true, progressText = "Starting checks…")
+        )
+        problemSolverJob = viewModelScope.launch {
+            try {
+                val result = diagnostics.solveProblem(target) { progress ->
+                    _state.value = _state.value.copy(
+                        problemSolver = _state.value.problemSolver.copy(progressText = progress)
+                    )
+                }
+                _state.value = _state.value.copy(
+                    problemSolver = _state.value.problemSolver.copy(isRunning = false, progressText = null, result = result)
+                )
+            } catch (canceled: CancellationException) {
+                _state.value = _state.value.copy(
+                    problemSolver = _state.value.problemSolver.copy(isRunning = false, progressText = "Canceled. No result was saved.")
+                )
+                throw canceled
+            } catch (error: Throwable) {
+                _state.value = _state.value.copy(
+                    problemSolver = _state.value.problemSolver.copy(
+                        isRunning = false,
+                        progressText = null,
+                        result = ProblemSolverResult(
+                            selectedDeviceName = target?.displayName,
+                            checks = listOf(
+                                ProblemSolverCheck(
+                                    ProblemCheckId.WIFI,
+                                    "Problem Solver",
+                                    ProblemCheckStatus.UNKNOWN,
+                                    error.message ?: "The diagnosis could not finish."
+                                )
+                            ),
+                            diagnosis = ProblemDiagnosis.INCOMPLETE
+                        )
+                    )
+                )
+            } finally {
+                problemSolverJob = null
+            }
+        }
+    }
+
+    fun cancelProblemSolver() {
+        problemSolverJob?.cancel()
+    }
+
     fun goBack() {
         diagnosticJob?.cancel()
+        problemSolverJob?.cancel()
         detailJob?.cancel()
         _state.value = _state.value.copy(
             route = ToolsRoute.INVENTORY,
             selectedDevice = null,
             selectedEvents = emptyList(),
             selectedServices = emptyList(),
-            diagnostic = DiagnosticUiState()
+            diagnostic = DiagnosticUiState(),
+            problemSolver = ProblemSolverUiState()
         )
     }
 

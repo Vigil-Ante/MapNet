@@ -46,6 +46,30 @@ interface AccessPointDao {
     suspend fun deleteByNetworkName(ssid: String): Int
 }
 
+@Dao
+interface NetworkListDao {
+    @Query("SELECT * FROM network_lists ORDER BY name COLLATE NOCASE")
+    fun observeLists(): Flow<List<NetworkListEntity>>
+
+    @Query("SELECT * FROM network_list_members")
+    fun observeMembers(): Flow<List<NetworkListMemberEntity>>
+
+    @Query("SELECT * FROM network_lists WHERE LOWER(name) = LOWER(:name) LIMIT 1")
+    suspend fun findByName(name: String): NetworkListEntity?
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertList(list: NetworkListEntity)
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertMembers(members: List<NetworkListMemberEntity>)
+
+    @Query("DELETE FROM network_list_members WHERE listId = :listId AND networkKey IN (:networkKeys)")
+    suspend fun removeMembers(listId: String, networkKeys: List<String>)
+
+    @Query("DELETE FROM network_lists WHERE id = :listId")
+    suspend fun deleteList(listId: String)
+}
+
 @Database(
     entities = [
         AccessPointEntity::class,
@@ -53,15 +77,18 @@ interface AccessPointDao {
         LanNetworkEntity::class,
         LanDeviceEntity::class,
         LanDeviceEventEntity::class,
-        LanServiceEntity::class
+        LanServiceEntity::class,
+        NetworkListEntity::class,
+        NetworkListMemberEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 @TypeConverters(SecurityConverters::class)
 abstract class MapNetDatabase : RoomDatabase() {
     abstract fun accessPointDao(): AccessPointDao
     abstract fun lanDeviceDao(): LanDeviceDao
+    abstract fun networkListDao(): NetworkListDao
 
     companion object {
         val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -151,6 +178,33 @@ abstract class MapNetDatabase : RoomDatabase() {
                     """.trimIndent()
                 )
                 database.execSQL("CREATE INDEX IF NOT EXISTS `index_lan_services_deviceId` ON `lan_services` (`deviceId`)")
+            }
+        }
+
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `network_lists` (
+                        `id` TEXT NOT NULL,
+                        `name` TEXT NOT NULL,
+                        `createdAtEpochMs` INTEGER NOT NULL,
+                        PRIMARY KEY(`id`)
+                    )
+                    """.trimIndent()
+                )
+                database.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `network_list_members` (
+                        `listId` TEXT NOT NULL,
+                        `networkKey` TEXT NOT NULL,
+                        PRIMARY KEY(`listId`, `networkKey`),
+                        FOREIGN KEY(`listId`) REFERENCES `network_lists`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                    """.trimIndent()
+                )
+                database.execSQL("CREATE INDEX IF NOT EXISTS `index_network_list_members_listId` ON `network_list_members` (`listId`)")
+                database.execSQL("CREATE INDEX IF NOT EXISTS `index_network_list_members_networkKey` ON `network_list_members` (`networkKey`)")
             }
         }
     }

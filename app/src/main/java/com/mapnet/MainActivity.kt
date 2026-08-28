@@ -45,6 +45,7 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -100,8 +101,10 @@ import com.mapnet.connection.canConnectWithMapNet
 import com.mapnet.connection.needsPassphrase
 import com.mapnet.data.AccessPointEntity
 import com.mapnet.data.MapNetDatabase
+import com.mapnet.data.NetworkListEntity
 import com.mapnet.data.ObservationEntity
 import com.mapnet.data.WifiSurveyRepository
+import com.mapnet.data.networkListKey
 import com.mapnet.maps.GoogleMapsSetup
 import com.mapnet.maps.googleMapsSetup
 import com.mapnet.security.WifiSecurityType
@@ -127,7 +130,11 @@ import kotlin.coroutines.resume
 class MainActivity : ComponentActivity() {
     private val database by lazy {
         Room.databaseBuilder(applicationContext, MapNetDatabase::class.java, "mapnet.db")
-            .addMigrations(MapNetDatabase.MIGRATION_1_2, MapNetDatabase.MIGRATION_2_3)
+            .addMigrations(
+                MapNetDatabase.MIGRATION_1_2,
+                MapNetDatabase.MIGRATION_2_3,
+                MapNetDatabase.MIGRATION_3_4
+            )
             .build()
     }
     private val viewModel: SurveyViewModel by viewModels {
@@ -167,6 +174,9 @@ private fun MapNetApp(
     val filter by viewModel.filter.collectAsStateWithLifecycle()
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
     val filteredAccessPoints by viewModel.filteredAccessPoints.collectAsStateWithLifecycle()
+    val customNetworkLists by viewModel.customNetworkLists.collectAsStateWithLifecycle()
+    val activeNetworkListId by viewModel.activeNetworkListId.collectAsStateWithLifecycle()
+    val selectedNetworkKeys by viewModel.selectedNetworkKeys.collectAsStateWithLifecycle()
     val mapObservations by viewModel.mapObservations.collectAsStateWithLifecycle()
     val summary by viewModel.summary.collectAsStateWithLifecycle()
     val selectedAp by viewModel.selectedAccessPoint.collectAsStateWithLifecycle()
@@ -244,6 +254,7 @@ private fun MapNetApp(
                             when (networkToolsState.route) {
                                 ToolsRoute.DEVICE_DETAIL -> networkToolsState.selectedDevice?.displayName ?: "Device details"
                                 ToolsRoute.MANUAL_DIAGNOSTICS -> "Manual diagnostics"
+                                ToolsRoute.PROBLEM_SOLVER -> "Problem Solver"
                                 ToolsRoute.INVENTORY -> "MapNet"
                             }
                         )
@@ -292,11 +303,24 @@ private fun MapNetApp(
                     searchQuery = searchQuery,
                     summary = summary,
                     accessPoints = filteredAccessPoints,
+                    customNetworkLists = customNetworkLists,
+                    activeNetworkListId = activeNetworkListId,
+                    selectedNetworkKeys = selectedNetworkKeys,
                     isScanning = isScanning,
                     isContinuousScanning = isContinuousScanning,
                     onFilter = viewModel::selectFilter,
                     onSearchQuery = viewModel::setSearchQuery,
                     onOpenOnly = { viewModel.selectFilter(SecurityFilter.OPEN) },
+                    onSelectNetworkList = viewModel::selectNetworkList,
+                    onCreateNetworkList = viewModel::createNetworkList,
+                    onCreateListAndOrganizeSelected = viewModel::createListAndOrganizeSelected,
+                    onDeleteActiveNetworkList = viewModel::deleteActiveNetworkList,
+                    onToggleNetworkSelection = viewModel::toggleNetworkSelection,
+                    onSelectAllNetworks = viewModel::selectAllNetworks,
+                    onClearNetworkSelection = viewModel::clearNetworkSelection,
+                    onAddSelectedNetworksToList = viewModel::addSelectedNetworksToList,
+                    onRemoveSelectedNetworksFromActiveList = viewModel::removeSelectedNetworksFromActiveList,
+                    onDeleteSelectedNetworks = viewModel::deleteSelectedNetworks,
                     onScan = {
                         if (context.hasSurveyPermission()) viewModel.performScan { context.currentSurveyLocation() }
                         else permissionLauncher.launch(context.surveyPermissions())
@@ -553,45 +577,81 @@ private fun SurveyScreen(
     searchQuery: String,
     summary: SecuritySummary,
     accessPoints: List<AccessPointEntity>,
+    customNetworkLists: List<NetworkListEntity>,
+    activeNetworkListId: String?,
+    selectedNetworkKeys: Set<String>,
     isScanning: Boolean,
     isContinuousScanning: Boolean,
     onFilter: (SecurityFilter) -> Unit,
     onSearchQuery: (String) -> Unit,
     onOpenOnly: () -> Unit,
+    onSelectNetworkList: (String?) -> Unit,
+    onCreateNetworkList: (String) -> Unit,
+    onCreateListAndOrganizeSelected: (String) -> Unit,
+    onDeleteActiveNetworkList: () -> Unit,
+    onToggleNetworkSelection: (AccessPointEntity) -> Unit,
+    onSelectAllNetworks: (List<AccessPointEntity>) -> Unit,
+    onClearNetworkSelection: () -> Unit,
+    onAddSelectedNetworksToList: (String) -> Unit,
+    onRemoveSelectedNetworksFromActiveList: () -> Unit,
+    onDeleteSelectedNetworks: () -> Unit,
     onScan: () -> Unit,
     onToggleContinuousScan: () -> Unit,
     onDetails: (String) -> Unit
 ) {
+    var selectionMode by rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+    var showCreateListDialog by rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+    var createListForSelection by rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+    var showOrganizeDialog by rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+    var showDeleteNetworksDialog by rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+    val activeNetworkList = customNetworkLists.firstOrNull { it.id == activeNetworkListId }
+
     Column(modifier.fillMaxSize()) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column {
-                Text("Wi-Fi survey", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                Text("Local observations only", style = MaterialTheme.typography.bodySmall)
-            }
-            Button(onClick = onScan, enabled = !isScanning && !isContinuousScanning) {
-                if (isScanning) {
-                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                    Spacer(Modifier.width(8.dp))
+            if (selectionMode) {
+                Column {
+                    Text("${selectedNetworkKeys.size} selected", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text("Select saved networks to organize or delete", style = MaterialTheme.typography.bodySmall)
                 }
-                Text(if (isScanning) "Scanning" else "Scan")
+                TextButton(onClick = {
+                    selectionMode = false
+                    onClearNetworkSelection()
+                }) { Text("Done") }
+            } else {
+                Column {
+                    Text("Wi-Fi survey", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text("Local observations only", style = MaterialTheme.typography.bodySmall)
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = { selectionMode = true }) { Text("Select") }
+                    Button(onClick = onScan, enabled = !isScanning && !isContinuousScanning) {
+                        if (isScanning) {
+                            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                            Spacer(Modifier.width(8.dp))
+                        }
+                        Text(if (isScanning) "Scanning" else "Scan")
+                    }
+                }
             }
         }
-        Button(
-            onClick = onToggleContinuousScan,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
-        ) {
-            Text(if (isContinuousScanning) "Stop continuous scan" else "Continuous scan")
-        }
-        if (isContinuousScanning) {
-            Text(
-                "Scanning about every 30 seconds while MapNet is open. If Android throttles a request, MapNet retries every 5 seconds until scanning resumes.",
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
-            )
+        if (!selectionMode) {
+            Button(
+                onClick = onToggleContinuousScan,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+            ) {
+                Text(if (isContinuousScanning) "Stop continuous scan" else "Continuous scan")
+            }
+            if (isContinuousScanning) {
+                Text(
+                    "Scanning about every 30 seconds while MapNet is open. If Android throttles a request, MapNet retries every 5 seconds until scanning resumes.",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+                )
+            }
         }
         OutlinedTextField(
             value = searchQuery,
@@ -602,6 +662,27 @@ private fun SurveyScreen(
         )
         SecuritySummaryCard(summary, onOpenOnly)
         SecurityFilterBar(filter, onFilter)
+        NetworkListBar(
+            customNetworkLists = customNetworkLists,
+            activeNetworkListId = activeNetworkListId,
+            onSelectNetworkList = onSelectNetworkList,
+            onCreateList = {
+                createListForSelection = false
+                showCreateListDialog = true
+            },
+            onDeleteActiveList = onDeleteActiveNetworkList
+        )
+        if (selectionMode) {
+            NetworkSelectionActions(
+                selectedCount = selectedNetworkKeys.size,
+                hasActiveList = activeNetworkList != null,
+                hasVisibleNetworks = accessPoints.isNotEmpty(),
+                onSelectAll = { onSelectAllNetworks(accessPoints) },
+                onOrganize = { showOrganizeDialog = true },
+                onRemoveFromActiveList = onRemoveSelectedNetworksFromActiveList,
+                onDelete = { showDeleteNetworksDialog = true }
+            )
+        }
         if (accessPoints.isEmpty()) {
             EmptySurveyState(searchQuery)
         } else {
@@ -611,11 +692,167 @@ private fun SurveyScreen(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 items(accessPoints, key = { it.bssid }) { ap ->
-                    AccessPointCard(ap, onDetails = { onDetails(ap.bssid) })
+                    AccessPointCard(
+                        ap = ap,
+                        selectionMode = selectionMode,
+                        selected = ap.networkListKey() in selectedNetworkKeys,
+                        onToggleSelection = { onToggleNetworkSelection(ap) },
+                        onDetails = { onDetails(ap.bssid) }
+                    )
                 }
             }
         }
     }
+
+    if (showCreateListDialog) {
+        NetworkListNameDialog(
+            title = "Create network list",
+            confirmLabel = "Create",
+            onDismiss = { showCreateListDialog = false },
+            onConfirm = {
+                if (createListForSelection) {
+                    onCreateListAndOrganizeSelected(it)
+                    selectionMode = false
+                } else {
+                    onCreateNetworkList(it)
+                }
+                showCreateListDialog = false
+            }
+        )
+    }
+    if (showOrganizeDialog) {
+        OrganizeNetworksDialog(
+            customNetworkLists = customNetworkLists,
+            onDismiss = { showOrganizeDialog = false },
+            onCreateList = {
+                showOrganizeDialog = false
+                createListForSelection = true
+                showCreateListDialog = true
+            },
+            onChooseList = {
+                onAddSelectedNetworksToList(it)
+                showOrganizeDialog = false
+                selectionMode = false
+            }
+        )
+    }
+    if (showDeleteNetworksDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteNetworksDialog = false },
+            title = { Text("Delete selected networks?") },
+            text = { Text("This removes ${selectedNetworkKeys.size} saved network${if (selectedNetworkKeys.size == 1) "" else "s"} and local observation history from MapNet. A later scan can add them again.") },
+            confirmButton = {
+                Button(onClick = {
+                    onDeleteSelectedNetworks()
+                    showDeleteNetworksDialog = false
+                    selectionMode = false
+                }) { Text("Delete") }
+            },
+            dismissButton = { TextButton(onClick = { showDeleteNetworksDialog = false }) { Text("Cancel") } }
+        )
+    }
+}
+
+@Composable
+private fun NetworkListBar(
+    customNetworkLists: List<NetworkListEntity>,
+    activeNetworkListId: String?,
+    onSelectNetworkList: (String?) -> Unit,
+    onCreateList: () -> Unit,
+    onDeleteActiveList: () -> Unit
+) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Custom lists", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.weight(1f))
+            TextButton(onClick = onCreateList) { Text("New list") }
+            if (activeNetworkListId != null) TextButton(onClick = onDeleteActiveList) { Text("Delete list") }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            FilterChip(selected = activeNetworkListId == null, onClick = { onSelectNetworkList(null) }, label = { Text("All") })
+            customNetworkLists.forEach { list ->
+                FilterChip(
+                    selected = activeNetworkListId == list.id,
+                    onClick = { onSelectNetworkList(list.id) },
+                    label = { Text(list.name) }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun NetworkSelectionActions(
+    selectedCount: Int,
+    hasActiveList: Boolean,
+    hasVisibleNetworks: Boolean,
+    onSelectAll: () -> Unit,
+    onOrganize: () -> Unit,
+    onRemoveFromActiveList: () -> Unit,
+    onDelete: () -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        AssistChip(onClick = onSelectAll, enabled = hasVisibleNetworks, label = { Text("Select all") })
+        AssistChip(onClick = onOrganize, enabled = selectedCount > 0, label = { Text("Add to list") })
+        if (hasActiveList) AssistChip(onClick = onRemoveFromActiveList, enabled = selectedCount > 0, label = { Text("Remove from list") })
+        AssistChip(onClick = onDelete, enabled = selectedCount > 0, label = { Text("Delete selected") })
+    }
+}
+
+@Composable
+private fun NetworkListNameDialog(
+    title: String,
+    confirmLabel: String,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit
+) {
+    var name by rememberSaveable { androidx.compose.runtime.mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                singleLine = true,
+                label = { Text("List name") }
+            )
+        },
+        confirmButton = { Button(onClick = { onConfirm(name) }, enabled = name.trim().isNotEmpty()) { Text(confirmLabel) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
+}
+
+@Composable
+private fun OrganizeNetworksDialog(
+    customNetworkLists: List<NetworkListEntity>,
+    onDismiss: () -> Unit,
+    onCreateList: () -> Unit,
+    onChooseList: (String) -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add selected networks to") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (customNetworkLists.isEmpty()) {
+                    Text("Create a custom list first.")
+                } else {
+                    customNetworkLists.forEach { list ->
+                        TextButton(onClick = { onChooseList(list.id) }, modifier = Modifier.fillMaxWidth()) { Text(list.name) }
+                    }
+                }
+            }
+        },
+        confirmButton = { Button(onClick = onCreateList) { Text("New list") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
 }
 
 @Composable
@@ -671,15 +908,29 @@ private fun EmptySurveyState(searchQuery: String) = Box(Modifier.fillMaxSize().p
 }
 
 @Composable
-private fun AccessPointCard(ap: AccessPointEntity, onDetails: () -> Unit) {
+private fun AccessPointCard(
+    ap: AccessPointEntity,
+    selectionMode: Boolean,
+    selected: Boolean,
+    onToggleSelection: () -> Unit,
+    onDetails: () -> Unit
+) {
     val isOpen = ap.securityType == WifiSecurityType.OPEN
     Card(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onDetails),
+        modifier = Modifier.fillMaxWidth().clickable(onClick = if (selectionMode) onToggleSelection else onDetails),
         colors = CardDefaults.cardColors(containerColor = if (isOpen) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceVariant)
     ) {
         Column(Modifier.padding(16.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
-                Text(ap.ssid, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                    if (selectionMode) {
+                        Checkbox(
+                            checked = selected,
+                            onCheckedChange = { onToggleSelection() }
+                        )
+                    }
+                    Text(ap.ssid, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
                 if (isOpen) OpenBadge()
             }
             Spacer(Modifier.height(6.dp))

@@ -25,7 +25,7 @@ class MapNetDatabaseMigrationTest {
     }
 
     @Test
-    fun `migration 2 to 3 keeps survey data and creates LAN inventory`() = runBlocking {
+    fun `migration 2 to 4 keeps survey data and creates LAN inventory and custom lists`() = runBlocking {
         context.deleteDatabase(databaseName)
         SQLiteDatabase.openOrCreateDatabase(context.getDatabasePath(databaseName), null).use { database ->
             database.execSQL(
@@ -84,7 +84,7 @@ class MapNetDatabaseMigrationTest {
         }
 
         val room = Room.databaseBuilder(context, MapNetDatabase::class.java, databaseName)
-            .addMigrations(MapNetDatabase.MIGRATION_2_3)
+            .addMigrations(MapNetDatabase.MIGRATION_2_3, MapNetDatabase.MIGRATION_3_4)
             .allowMainThreadQueries()
             .build()
         openedDatabase = room
@@ -105,5 +105,10 @@ class MapNetDatabaseMigrationTest {
             )
         )
         assertEquals("Saved network", room.lanDeviceDao().getNetwork("network")?.ssid)
+        room.networkListDao().insertList(NetworkListEntity("favorites", "Favorites", 3_000))
+        room.networkListDao().insertMembers(
+            listOf(NetworkListMemberEntity("favorites", "ssid:saved network"))
+        )
+        assertEquals("Favorites", room.networkListDao().findByName("favorites")?.name)
     }
 }
