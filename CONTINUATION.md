@@ -6,8 +6,8 @@ This file is for the next development agent working on MapNet. Read it before ch
 
 - Repository: <https://github.com/Vigil-Ante/MapNet>
 - Default branch: `main`
-- Current release: `v0.2.5`
-- Current signed APK: <https://github.com/Vigil-Ante/MapNet/releases/download/v0.2.5/MapNet-v0.2.5.apk>
+- Current release: `v0.3.0`
+- Current signed APK: <https://github.com/Vigil-Ante/MapNet/releases/download/v0.3.0/MapNet-v0.3.0.apk>
 - Package/application ID: `com.mapnet`
 - Minimum Android version: API 26 (Android 8.0)
 
@@ -20,7 +20,8 @@ This file is for the next development agent working on MapNet. Read it before ch
 - The Survey list can be searched by Wi-Fi name or BSSID.
 - AP details start Android's Wi-Fi Network Request prompt for supported open/personal WPA networks on Android 10 and newer. This connects MapNet directly but does not add a device-wide saved network; MapNet binds to the approved connection while the app remains open. Enterprise, legacy, hidden, and older Android configurations open Android Wi-Fi Settings instead.
 - Deleting a visible AP removes every matching visible network record and its local BSSID observation history. It is not a permanent blocklist: a later scan can rediscover it.
-- The **Tools** tab displays current Wi-Fi SSID/BSSID, IPv4 addresses, gateway, and DNS; offers Ping and traceroute; and maps locally reachable devices on a private IPv4 Wi-Fi subnet (up to 510 hosts). Discovery combines one ICMP request per host with local ARP records and must not claim to find devices blocked by firewall or guest/client isolation.
+- The **Tools** tab is a persistent devices-first inventory for the active private IPv4 Wi-Fi subnet (up to 510 hosts). Discovery combines ICMP/ARP with reverse DNS, mDNS/DNS-SD, SSDP/UPnP, NetBIOS, and an offline MAC-vendor seed. Device details include editable name/type/note, services, online/offline timeline, Ping, traceroute, bounded TCP port scanning, copy-address actions, and validated local web links. There are no fake Block/Pause controls or cloud fingerprint calls.
+- Room database version 3 adds per-network LAN devices, state-change events, and discovered services. `MIGRATION_2_3` preserves the existing survey tables. Only a fully completed device scan marks absent devices offline; failed or canceled scans leave saved status untouched.
 - The **Continuous scan** button runs while the app is open:
   - a normal scan request is made about every 30 seconds;
   - if Android rejects it (often due to Wi-Fi scan throttling), MapNet retries every 5 seconds until one is accepted;
@@ -39,7 +40,7 @@ For local testing, compatible Android versions may expose **Developer options â†
 The workspace includes Gradle 8.7 and JDK 17 under `.tools`.
 
 ```powershell
-.\mapnet-gradle.bat testDebugUnitTest assembleDebug --no-daemon --max-workers=1
+.\mapnet-gradle.bat testDebugUnitTest lintDebug assembleDebug --no-daemon --max-workers=1
 ```
 
 The published release workflow runs the unit tests and builds a signed release APK. The relevant workflow is:

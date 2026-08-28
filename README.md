@@ -10,15 +10,19 @@ MapNet is a local-first Android Wi-Fi survey MVP. It retains each BSSID as a loc
 4. Filter the list and the Google Maps survey view together by security type.
 5. Inspect an AP’s normalized security details and observations count, or delete the local network record and its local history. A later scan can rediscover a deleted network.
 6. On Android 10 or newer, request Android's explicit confirmation to connect MapNet to supported open and personal WPA networks without saving them as a device-wide Wi-Fi network. Enterprise, legacy, hidden, and older Android configurations open Wi-Fi Settings instead.
-7. Inspect the active Wi-Fi connection’s IP details, run Ping and a local traceroute, and map reachable devices on the current private Wi-Fi subnet from the Tools tab.
+7. Open Tools for a persistent, devices-first inventory of the connected private Wi-Fi subnet. Search and filter known devices, inspect locally discovered identity and service details, save friendly names/types/notes, review online/offline history, and run per-device diagnostics.
 
 Continuous scan requests a normal scan roughly every 30 seconds. When Android declines a request because of its system-level Wi-Fi scan throttle, MapNet retries every five seconds until Android accepts one; Android does not expose an exact throttle-expiry notification.
 
 `OWE / Enhanced Open` is deliberately shown as passwordless **and encrypted**, rather than as a traditional open network.
 
-## Local network mapping
+## Local device inventory
 
-**Map local devices** sends one ICMP echo request to each usable address on the currently connected private IPv4 Wi-Fi subnet (up to 510 addresses), then combines responses with the device's local ARP table and configured gateway. It does not scan the public internet or devices on another subnet. Devices that block ping, do not appear in the ARP table, or are separated by guest-network/client isolation cannot be detected.
+**Scan devices** sends one ICMP echo request to each usable address on the currently connected private IPv4 Wi-Fi subnet (up to 510 addresses), then combines responses with the local ARP table, configured gateway, reverse DNS, mDNS/DNS-SD, SSDP/UPnP, NetBIOS, and a bundled offline MAC-vendor seed. It does not scan the public internet, use cloud fingerprinting, or require a Google Maps API key. Devices that reject discovery traffic or are separated by guest-network/client isolation may not be detected.
+
+Successful scans are stored per network. MapNet shows cached results immediately and refreshes a new or stale network when Tools opens. A device is marked offline only after a later scan of that same network completes successfully; a canceled or failed scan does not change saved statuses.
+
+Tap a device for identity, first/last-seen times, discovery sources, services, open ports, and a status timeline. Available actions are Ping, Traceroute, a bounded TCP port scan, copying IP/MAC details, and opening a locally advertised or detected web interface. **Forget device** removes only MapNet's saved record and does not disconnect it. Router-specific Block and Pause Internet controls are intentionally not presented because Android cannot provide them without a supported router administration API.
 
 ## Build
 
@@ -27,7 +31,7 @@ Open this directory in Android Studio, select a device running Android 8.0 (API 
 Gradle 8.7 and Temurin JDK 17 are supplied locally in `.tools`. For a command-line build, install/configure an Android SDK (set `ANDROID_HOME`, or put `sdk.dir=<SDK path>` in an untracked `local.properties`) and run:
 
 ```powershell
-.\mapnet-gradle.bat testDebugUnitTest
+.\mapnet-gradle.bat testDebugUnitTest lintDebug assembleDebug
 ```
 
 ## Google Maps survey view

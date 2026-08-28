@@ -1,0 +1,162 @@
+# MapNet offline vendor seed generated from the IEEE MA-L public registry on 2026-08-28.
+F0EE7A|Apple
+58AD12|Apple
+60FDA6|Apple
+80A997|Apple
+348C5E|Apple
+641B2F|Samsung
+9C73B1|Samsung
+388A06|Samsung
+48BCE1|Samsung
+D0D003|Samsung
+60706C|Google
+C82ADD|Google
+242934|Google
+08B4B1|Google
+60B76E|Google
+842859|Amazon
+2873F6|Amazon
+E0CB1D|Amazon
+FCD749|Amazon
+0891A3|Amazon
+D04D2C|Roku
+B0A737|Roku
+B0EE7B|Roku
+D83134|Roku
+105932|Roku
+AC5AF0|LG
+B03795|LG
+58FDB1|LG
+A04F85|LG
+7CF31B|LG
+AC800A|Sony
+F46412|Sony Interactive Entertainment
+2C9E00|Sony Interactive Entertainment
+143FA6|Sony
+78C881|Sony Interactive Entertainment
+70F8AE|Microsoft
+201642|Microsoft
+C461C7|Microsoft
+D8E2DF|Microsoft
+A085FC|Microsoft
+D0431E|Dell
+00C04F|Dell
+00B0D0|Dell
+0019B9|Dell
+001AA0|Dell
+9C7BEF|Hewlett Packard
+10E7C6|Hewlett Packard
+B8AF67|Hewlett Packard
+80CE62|Hewlett Packard
+40B034|Hewlett Packard
+644ED7|HP
+7C4D8F|HP
+5C60BA|HP
+508140|HP
+F80DAC|HP
+5016F4|Motorola / Lenovo
+C4A052|Motorola / Lenovo
+48C35A|Lenovo
+C85895|Motorola / Lenovo
+08AA55|Motorola / Lenovo
+E4C767|Intel
+A002A5|Intel
+444988|Intel
+102E00|Intel
+E80AB9|Cisco
+9CE330|Cisco Meraki
+B4DF91|Cisco Meraki
+481BA4|Cisco
+6C03B5|Cisco
+F09FC2|Ubiquiti
+802AA8|Ubiquiti
+788A20|Ubiquiti
+7483C2|Ubiquiti
+E063DA|Ubiquiti
+34F716|TP-Link
+54A703|TP-Link
+B0BE76|TP-Link
+34E894|TP-Link
+94D9B3|TP-Link
+405D82|NETGEAR
+DCEF09|NETGEAR
+100C6B|NETGEAR
+3894ED|NETGEAR
+9CC9EB|NETGEAR
+342B70|ARRIS
+00047D|Motorola Solutions
+0838E6|Motorola
+D48AFC|Espressif
+E465B8|Espressif
+B48A0A|Espressif
+94E686|Espressif
+34B472|Espressif
+1C90FF|Tuya Smart
+FC3CD7|Tuya Smart
+E4AEE4|Tuya Smart
+FC671F|Tuya Smart
+CC8CBF|Tuya Smart
+D83ADD|Raspberry Pi
+DCA632|Raspberry Pi
+E45F01|Raspberry Pi
+88A29E|Raspberry Pi
+98FE54|Raspberry Pi
+002618|ASUS
+049226|ASUS
+1831BF|ASUS
+88D7F6|ASUS
+6045CB|ASUS
+008077|Brother
+B07C8E|Brother
+001BA9|Brother
+3C2AF4|Brother
+30055C|Brother
+84BA3B|Canon
+60128B|Canon
+000220|Canon
+5C625A|Canon
+7438B7|Canon
+A4D73C|Epson
+50579C|Epson
+0026AB|Epson
+5805D9|Epson
+BCC8CC|Epson
+000004|Xerox
+9C934E|Xerox
+0000AA|Xerox
+000001|Xerox
+000005|Xerox
+601AC7|Nintendo
+BC9EBB|Nintendo
+CC5B31|Nintendo
+1C4586|Nintendo
+E8A0CD|Nintendo
+CCEB5E|Xiaomi
+B8EA98|Xiaomi
+8CD0B2|Xiaomi
+F41A9C|Xiaomi
+DC6AE7|Xiaomi
+E00630|Huawei
+D8DAF1|Huawei
+54443B|Huawei
+5C7075|Huawei
+782DAD|Huawei
+9009D0|Synology
+001132|Synology
+245EBE|QNAP
+E843B6|QNAP
+CC6A10|Chamberlain
+441146|Chamberlain
+645299|Chamberlain
+0C9505|Chamberlain
+001525|Chamberlain
+1C8B76|Calix
+B89470|Calix
+000631|Calix
+E04934|Calix
+4C4341|Calix
+00620B|Broadcom
+5C6F69|Broadcom
+BC97E1|Broadcom
+001BE9|Broadcom
+0005B5|Broadcom

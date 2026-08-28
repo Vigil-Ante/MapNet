@@ -44,14 +44,21 @@ fun String?.isConfiguredGoogleMapsKey(): Boolean =
     !isNullOrBlank() && this != UNCONFIGURED_MAPS_API_KEY && this != "YOUR_GOOGLE_MAPS_ANDROID_API_KEY"
 
 private fun Context.signingCertificateSha1s(): List<String> = runCatching {
-    val packageInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+    val packageInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         packageManager.getPackageInfo(
             packageName,
             PackageManager.PackageInfoFlags.of(PackageManager.GET_SIGNING_CERTIFICATES.toLong())
         )
     } else {
         @Suppress("DEPRECATION")
-        packageManager.getPackageInfo(packageName, PackageManager.GET_SIGNATURES)
+        packageManager.getPackageInfo(
+            packageName,
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                PackageManager.GET_SIGNING_CERTIFICATES
+            } else {
+                PackageManager.GET_SIGNATURES
+            }
+        )
     }
     val signatures = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
         packageInfo.signingInfo?.apkContentsSigners.orEmpty()

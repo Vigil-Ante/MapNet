@@ -50,7 +50,7 @@ jobs:
           fi
           VERSION_CODE=$((100000 + GITHUB_RUN_NUMBER))
           VERSION_NAME="${GITHUB_REF_NAME#v}"
-          bash gradlew testDebugUnitTest assembleRelease \
+          bash gradlew testDebugUnitTest lintDebug assembleRelease \
             -PmapnetVersionCode="$VERSION_CODE" \
             -PmapnetVersionName="$VERSION_NAME"
           mkdir -p release-assets

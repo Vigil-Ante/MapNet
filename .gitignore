@@ -3,6 +3,7 @@
 .tools/
 .kotlin/
 .idea/
+.codex-remote-attachments/
 local.properties
 secrets.properties
 update.properties

@@ -12,6 +12,7 @@ import android.os.Build
 import android.os.CancellationSignal
 import android.os.Looper
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -58,6 +59,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -106,7 +111,11 @@ import com.mapnet.survey.SurveyLocationCluster
 import com.mapnet.survey.SurveyViewModel
 import com.mapnet.survey.toSurveyLocationClusters
 import com.mapnet.tools.NetworkToolsUiState
+import com.mapnet.tools.LanDeviceRepository
+import com.mapnet.tools.NetworkDiagnostics
+import com.mapnet.tools.NetworkToolsScreen
 import com.mapnet.tools.NetworkToolsViewModel
+import com.mapnet.tools.ToolsRoute
 import com.mapnet.update.UpdateUiState
 import com.mapnet.update.UpdateViewModel
 import java.text.DateFormat
@@ -118,14 +127,20 @@ import kotlin.coroutines.resume
 class MainActivity : ComponentActivity() {
     private val database by lazy {
         Room.databaseBuilder(applicationContext, MapNetDatabase::class.java, "mapnet.db")
-            .addMigrations(MapNetDatabase.MIGRATION_1_2)
+            .addMigrations(MapNetDatabase.MIGRATION_1_2, MapNetDatabase.MIGRATION_2_3)
             .build()
     }
     private val viewModel: SurveyViewModel by viewModels {
         SurveyViewModel.Factory(WifiSurveyRepository(applicationContext, database))
     }
     private val updateViewModel: UpdateViewModel by viewModels()
-    private val networkToolsViewModel: NetworkToolsViewModel by viewModels()
+    private val networkToolsViewModel: NetworkToolsViewModel by viewModels {
+        NetworkToolsViewModel.Factory(
+            application = application,
+            repository = LanDeviceRepository(database),
+            diagnostics = NetworkDiagnostics(applicationContext)
+        )
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -213,33 +228,59 @@ private fun MapNetApp(
         }
     }
 
+    LaunchedEffect(screen.value) {
+        if (screen.value == MapNetScreen.TOOLS) networkToolsViewModel.onToolsVisible()
+    }
+
+    val isNestedToolsRoute = screen.value == MapNetScreen.TOOLS && networkToolsState.isNestedRoute
+    BackHandler(enabled = isNestedToolsRoute, onBack = networkToolsViewModel::goBack)
+
     MaterialTheme {
         Scaffold(
             topBar = {
                 TopAppBar(
-                    title = { Text("MapNet") },
-                    actions = { UpdateAction(updateState, updateViewModel::checkForUpdate) }
+                    title = {
+                        Text(
+                            when (networkToolsState.route) {
+                                ToolsRoute.DEVICE_DETAIL -> networkToolsState.selectedDevice?.displayName ?: "Device details"
+                                ToolsRoute.MANUAL_DIAGNOSTICS -> "Manual diagnostics"
+                                ToolsRoute.INVENTORY -> "MapNet"
+                            }
+                        )
+                    },
+                    navigationIcon = {
+                        if (isNestedToolsRoute) {
+                            IconButton(onClick = networkToolsViewModel::goBack) {
+                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to devices")
+                            }
+                        }
+                    },
+                    actions = {
+                        if (!isNestedToolsRoute) UpdateAction(updateState, updateViewModel::checkForUpdate)
+                    }
                 )
             },
             snackbarHost = { SnackbarHost(snackbarHostState) },
             bottomBar = {
-                NavigationBar {
-                    MapNetScreen.entries.forEach { destination ->
-                        NavigationBarItem(
-                            selected = screen.value == destination,
-                            onClick = { screen.value = destination },
-                            icon = {
-                                Text(
-                                    when (destination) {
-                                        MapNetScreen.SURVEY -> "⌁"
-                                        MapNetScreen.MAP -> "⌖"
-                                        MapNetScreen.TOOLS -> "⌘"
-                                        MapNetScreen.SETTINGS -> "⚙"
-                                    }
-                                )
-                            },
-                            label = { Text(destination.title) }
-                        )
+                if (!isNestedToolsRoute) {
+                    NavigationBar {
+                        MapNetScreen.entries.forEach { destination ->
+                            NavigationBarItem(
+                                selected = screen.value == destination,
+                                onClick = { screen.value = destination },
+                                icon = {
+                                    Text(
+                                        when (destination) {
+                                            MapNetScreen.SURVEY -> "⌁"
+                                            MapNetScreen.MAP -> "⌖"
+                                            MapNetScreen.TOOLS -> "⌘"
+                                            MapNetScreen.SETTINGS -> "⚙"
+                                        }
+                                    )
+                                },
+                                label = { Text(destination.title) }
+                            )
+                        }
                     }
                 }
             }
@@ -286,10 +327,7 @@ private fun MapNetApp(
                 MapNetScreen.TOOLS -> NetworkToolsScreen(
                     modifier = Modifier.padding(padding),
                     state = networkToolsState,
-                    onRefresh = networkToolsViewModel::refresh,
-                    onPing = networkToolsViewModel::ping,
-                    onTraceroute = networkToolsViewModel::traceroute,
-                    onMapLocalNetwork = networkToolsViewModel::mapLocalNetwork
+                    viewModel = networkToolsViewModel
                 )
                 MapNetScreen.SETTINGS -> SettingsScreen(
                     modifier = Modifier.padding(padding),
@@ -323,108 +361,6 @@ private fun MapNetApp(
             onInstall = updateViewModel::requestInstall,
             onDismiss = updateViewModel::dismissDialog
         )
-    }
-}
-
-@Composable
-private fun NetworkToolsScreen(
-    modifier: Modifier,
-    state: NetworkToolsUiState,
-    onRefresh: () -> Unit,
-    onPing: (String) -> Unit,
-    onTraceroute: (String) -> Unit,
-    onMapLocalNetwork: () -> Unit
-) {
-    var destination by rememberSaveable { androidx.compose.runtime.mutableStateOf("1.1.1.1") }
-    Column(
-        modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        Text("Network tools", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-        Text("Diagnostics run locally over the device's active Wi-Fi connection.", style = MaterialTheme.typography.bodySmall)
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("CURRENT CONNECTED AP", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                state.connection?.let { connection ->
-                    DetailRow("Wi-Fi name", connection.ssid)
-                    DetailRow("BSSID", connection.bssid)
-                    DetailRow("IPv4", connection.ipv4Addresses.ifEmpty { listOf("Unavailable") }.joinToString())
-                    DetailRow("Gateway", connection.gateway ?: "Unavailable")
-                    DetailRow("DNS", connection.dnsServers.ifEmpty { listOf("Unavailable") }.joinToString())
-                } ?: Text("No active Wi-Fi connection detected. Connect in Android, then tap Refresh.")
-            }
-        }
-        Button(onClick = onRefresh, modifier = Modifier.align(Alignment.End)) { Text("Refresh IP details") }
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("LOCAL NETWORK MAP", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                Text(
-                    "Sends one ping to each private IPv4 address on this Wi-Fi subnet (up to 510 addresses) and combines replies with local ARP entries. It never probes the public internet.",
-                    style = MaterialTheme.typography.bodySmall
-                )
-                Text(
-                    "Guest-network isolation and devices that block ping may keep devices out of the results.",
-                    style = MaterialTheme.typography.bodySmall
-                )
-                Button(
-                    onClick = onMapLocalNetwork,
-                    enabled = !state.isRunning && state.connection != null
-                ) { Text("Map local devices") }
-                state.networkMapProgress?.let { progress ->
-                    Text(
-                        "Checking ${progress.completedAddressCount} of ${progress.totalAddressCount} addresses…",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                }
-            }
-        }
-        state.networkMap?.let { networkMap ->
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("DEVICES ON ${networkMap.subnet}", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                    Text(
-                        "${networkMap.devices.size} device entries found after checking ${networkMap.scannedAddressCount} addresses.",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    networkMap.devices.forEach { device ->
-                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            DetailRow("IPv4", device.ipv4Address)
-                            device.macAddress?.let { macAddress -> DetailRow("MAC", macAddress) }
-                            Text(device.discoveryDetail, style = MaterialTheme.typography.bodySmall)
-                        }
-                    }
-                }
-            }
-        }
-        OutlinedTextField(
-            value = destination,
-            onValueChange = { destination = it },
-            label = { Text("Destination (host or IP)") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-            Button(onClick = { onPing(destination) }, enabled = !state.isRunning, modifier = Modifier.weight(1f)) {
-                Text("Ping")
-            }
-            Button(onClick = { onTraceroute(destination) }, enabled = !state.isRunning, modifier = Modifier.weight(1f)) {
-                Text("Traceroute")
-            }
-        }
-        if (state.isRunning) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                Text("Running ${state.outputTitle?.lowercase().orEmpty()}…")
-            }
-        }
-        state.output?.let { output ->
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(state.outputTitle ?: "Result", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                    Text(output, style = MaterialTheme.typography.bodySmall)
-                }
-            }
-        }
     }
 }
 
@@ -545,6 +481,24 @@ private fun SettingsScreen(
                         Text(sha1, style = MaterialTheme.typography.bodySmall)
                     }
                 }
+            }
+        }
+
+        Card {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text("Local device identification", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Text(
+                    "Network device names, vendors, and services are identified on the connected private Wi-Fi network. MapNet does not send device identifiers to a cloud lookup service.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                DetailRow("MAC vendor data", "IEEE offline seed · ${com.mapnet.tools.MacVendorLookup.DATABASE_DATE}")
+                Text(
+                    "Exact models appear only when a device advertises them. No Google Maps API key is needed for device discovery.",
+                    style = MaterialTheme.typography.bodySmall
+                )
             }
         }
     }

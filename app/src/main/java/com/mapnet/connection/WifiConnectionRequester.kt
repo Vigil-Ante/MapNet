@@ -13,6 +13,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import androidx.annotation.RequiresApi
 import com.mapnet.data.AccessPointEntity
 import com.mapnet.security.WifiSecurityType
 
@@ -106,6 +107,7 @@ class WifiConnectionRequester(private val context: Context) {
         }
     }
 
+    @RequiresApi(Build.VERSION_CODES.Q)
     private fun buildNetworkSpecifier(accessPoint: AccessPointEntity, passphrase: String): WifiNetworkSpecifier {
         val builder = WifiNetworkSpecifier.Builder().setSsid(accessPoint.ssid)
         accessPoint.bssidAsMacAddress()?.let(builder::setBssid)
@@ -169,6 +171,7 @@ class WifiConnectionRequester(private val context: Context) {
     private val mainHandler = Handler(Looper.getMainLooper())
 }
 
+@RequiresApi(Build.VERSION_CODES.P)
 private fun AccessPointEntity.bssidAsMacAddress(): MacAddress? =
     runCatching { MacAddress.fromString(bssid) }.getOrNull()
 
