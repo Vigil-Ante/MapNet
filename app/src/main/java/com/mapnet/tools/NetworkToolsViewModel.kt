@@ -255,6 +255,51 @@ class NetworkToolsViewModel(
 
     fun scanCommonPorts() = scanPorts(COMMON_TCP_PORTS)
 
+    fun identifySelectedDevice() {
+        val device = _state.value.selectedDevice ?: return
+        val services = _state.value.selectedServices
+        if (_state.value.isScanning) return
+        diagnosticJob?.cancel()
+        _state.value = _state.value.copy(
+            diagnostic = DiagnosticUiState(
+                title = "Identify device",
+                isRunning = true,
+                progressText = "Inspecting known local web services…"
+            )
+        )
+        diagnosticJob = viewModelScope.launch {
+            try {
+                val identification = diagnostics.identifyLocalDevice(device, services)
+                val output = if (identification == null) {
+                    "No additional name or model clue was available from this device's known local web services."
+                } else {
+                    repository.saveIdentification(device.id, identification)
+                    buildString {
+                        append("Saved local identification evidence.")
+                        identification.friendlyName?.let { append("\nName: $it") }
+                        identification.vendor?.let { append("\nManufacturer: $it") }
+                        identification.model?.let { append("\nModel clue: $it") }
+                        if (identification.detail.isNotBlank()) append("\n${identification.detail}")
+                    }
+                }
+                _state.value = _state.value.copy(
+                    diagnostic = DiagnosticUiState(title = "Identify device", output = output)
+                )
+            } catch (canceled: CancellationException) {
+                throw canceled
+            } catch (error: Throwable) {
+                _state.value = _state.value.copy(
+                    diagnostic = DiagnosticUiState(
+                        title = "Identify device",
+                        output = error.message ?: "Local device identification failed."
+                    )
+                )
+            } finally {
+                diagnosticJob = null
+            }
+        }
+    }
+
     fun scanCustomPorts(start: Int, endInclusive: Int) {
         val ports = runCatching { customTcpPorts(start, endInclusive) }.getOrElse { error ->
             _state.value = _state.value.copy(

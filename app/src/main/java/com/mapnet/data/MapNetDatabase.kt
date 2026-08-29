@@ -81,7 +81,7 @@ interface NetworkListDao {
         NetworkListEntity::class,
         NetworkListMemberEntity::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 @TypeConverters(SecurityConverters::class)
@@ -205,6 +205,14 @@ abstract class MapNetDatabase : RoomDatabase() {
                 )
                 database.execSQL("CREATE INDEX IF NOT EXISTS `index_network_list_members_listId` ON `network_list_members` (`listId`)")
                 database.execSQL("CREATE INDEX IF NOT EXISTS `index_network_list_members_networkKey` ON `network_list_members` (`networkKey`)")
+            }
+        }
+
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE lan_devices ADD COLUMN identificationSource TEXT")
+                database.execSQL("ALTER TABLE lan_devices ADD COLUMN identificationDetail TEXT")
+                database.execSQL("ALTER TABLE lan_devices ADD COLUMN identifiedAtEpochMs INTEGER")
             }
         }
     }

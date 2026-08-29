@@ -23,6 +23,8 @@ import java.net.URI
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.TimeUnit
 import javax.net.ssl.HttpsURLConnection
+import javax.net.ssl.SSLSocket
+import javax.net.ssl.SSLSocketFactory
 import kotlin.coroutines.resume
 import kotlin.random.Random
 import kotlinx.coroutines.Dispatchers
@@ -95,6 +97,29 @@ class NetworkDiagnostics(private val context: Context) {
                 if (output.contains("bytes from", ignoreCase = true)) break
             }
         }.trimEnd()
+    }
+
+    /**
+     * Identifies a user-selected device through its already discovered local
+     * HTTP/HTTPS service. It never scans ports, follows redirects, or sends
+     * authentication data.
+     */
+    suspend fun identifyLocalDevice(
+        device: KnownLanDevice,
+        services: List<LanService>
+    ): DeviceIdentification? = withContext(Dispatchers.IO) {
+        val connectivityManager = context.getSystemService(ConnectivityManager::class.java)
+        val network = connectivityManager.currentWifiNetwork()
+            ?: error("Connect to Wi-Fi before identifying a local device.")
+        val linkProperties = connectivityManager.getLinkProperties(network)
+            ?: error("Wi-Fi network details are unavailable.")
+        val linkAddress = linkProperties.linkAddresses.firstOrNull { it.address is Inet4Address }
+            ?: error("This Wi-Fi connection does not have an IPv4 address.")
+        val subnet = Ipv4Subnet.from(linkAddress.address.address.toIpv4AddressValue(), linkAddress.prefixLength)
+        val candidates = services.mapNotNull(LanService::url).distinct().take(MAX_IDENTIFICATION_ENDPOINTS)
+        if (candidates.isEmpty()) error("Find a local HTTP or HTTPS service first, then try Identify device.")
+        candidates.mapNotNull { url -> localWebFingerprint(network, subnet, device.ipAddress, url) }
+            .reduceOrNull(DeviceIdentification::merge)
     }
 
     /**
@@ -449,6 +474,81 @@ class NetworkDiagnostics(private val context: Context) {
             ).takeIf { it.friendlyName != null || it.vendor != null || it.model != null }
         }.getOrNull()
 
+    private fun localWebFingerprint(
+        network: Network,
+        subnet: Ipv4Subnet,
+        expectedAddress: String,
+        endpoint: String
+    ): DeviceIdentification? = runCatching {
+        val uri = URI(endpoint)
+        val host = uri.host ?: return@runCatching null
+        val addressValue = host.toIpv4AddressValueOrNull() ?: return@runCatching null
+        if (host != expectedAddress || !subnet.contains(addressValue)) return@runCatching null
+        val port = if (uri.port > 0) uri.port else if (uri.scheme.equals("https", true)) 443 else 80
+        when {
+            uri.scheme.equals("http", true) -> httpFingerprint(network, host, port)
+            uri.scheme.equals("https", true) -> tlsFingerprint(network, host, port)
+            else -> null
+        }
+    }.getOrNull()
+
+    private fun httpFingerprint(network: Network, host: String, port: Int): DeviceIdentification? {
+        val response = Socket().use { socket ->
+            network.bindSocket(socket)
+            socket.connect(InetSocketAddress(host, port), LOCAL_HTTP_TIMEOUT_MS)
+            socket.soTimeout = LOCAL_HTTP_TIMEOUT_MS
+            socket.getOutputStream().write(
+                "GET / HTTP/1.1\r\nHost: $host\r\nUser-Agent: MapNet/1.0\r\nConnection: close\r\n\r\n"
+                    .toByteArray(StandardCharsets.US_ASCII)
+            )
+            val output = ByteArrayOutputStream()
+            val buffer = ByteArray(4_096)
+            while (output.size() < MAX_WEB_FINGERPRINT_BYTES) {
+                val count = socket.getInputStream().read(buffer)
+                if (count < 0) break
+                output.write(buffer, 0, minOf(count, MAX_WEB_FINGERPRINT_BYTES - output.size()))
+            }
+            String(output.toByteArray(), StandardCharsets.UTF_8)
+        }
+        val headerText = response.substringBefore("\r\n\r\n", response)
+        val body = response.substringAfter("\r\n\r\n", "")
+        val headers = headerText.lineSequence().drop(1).mapNotNull { line ->
+            line.indexOf(':').takeIf { it > 0 }?.let { index ->
+                line.substring(0, index).trim().lowercase() to line.substring(index + 1).trim()
+            }
+        }.toMap()
+        val title = Regex("<title[^>]*>(.*?)</title>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+            .find(body)?.groupValues?.getOrNull(1)?.replace(Regex("<[^>]+>"), "")?.trim()?.take(120)
+        val server = headers["server"]?.take(120)
+        if (title.isNullOrBlank() && server.isNullOrBlank()) return null
+        return DeviceIdentification(
+            friendlyName = title.takeUnless { it.isNullOrBlank() || it.equals("login", true) },
+            model = server.cleanValue(),
+            source = DiscoverySource.WEB_FINGERPRINT,
+            detail = listOfNotNull(title?.let { "HTTP title: $it" }, server?.let { "Server: $it" }).joinToString(" · ")
+        )
+    }
+
+    private fun tlsFingerprint(network: Network, host: String, port: Int): DeviceIdentification? {
+        val rawSocket = Socket()
+        return try {
+            network.bindSocket(rawSocket)
+            rawSocket.connect(InetSocketAddress(host, port), LOCAL_HTTP_TIMEOUT_MS)
+            ((SSLSocketFactory.getDefault() as SSLSocketFactory)
+                .createSocket(rawSocket, host, port, true) as SSLSocket).use { socket ->
+                socket.soTimeout = LOCAL_HTTP_TIMEOUT_MS
+                socket.startHandshake()
+                val subject = socket.session.peerPrincipal?.name?.take(200) ?: return null
+                DeviceIdentification(
+                    source = DiscoverySource.WEB_FINGERPRINT,
+                    detail = "TLS certificate subject: $subject"
+                )
+            }
+        } finally {
+            runCatching { rawSocket.close() }
+        }
+    }
+
     private suspend fun discoverMdnsDevices(subnet: Ipv4Subnet): Map<String, AdvertisedIdentity> {
         val wifiManager = context.applicationContext.getSystemService(WifiManager::class.java)
         val multicastLock = wifiManager.createMulticastLock("MapNet-device-discovery").apply {
@@ -650,13 +750,17 @@ class NetworkDiagnostics(private val context: Context) {
         const val MAX_MDNS_SERVICES = 24
         const val NETBIOS_PORT = 137
         const val NETBIOS_TIMEOUT_MS = 450
+        const val MAX_IDENTIFICATION_ENDPOINTS = 4
+        const val MAX_WEB_FINGERPRINT_BYTES = 16_384
         const val PROBLEM_SOLVER_HOST = "connectivitycheck.gstatic.com"
         const val PROBLEM_SOLVER_HTTPS_URL = "https://connectivitycheck.gstatic.com/generate_204"
         const val PROBLEM_SOLVER_TIMEOUT_MS = 4_000
 
         val MDNS_SERVICE_TYPES = listOf(
             "_http._tcp.", "_https._tcp.", "_googlecast._tcp.", "_airplay._tcp.",
-            "_ipp._tcp.", "_workstation._tcp.", "_smb._tcp.", "_hap._tcp.", "_roku-ecp._tcp."
+            "_raop._tcp.", "_ipp._tcp.", "_ipps._tcp.", "_printer._tcp.",
+            "_pdl-datastream._tcp.", "_workstation._tcp.", "_smb._tcp.", "_nfs._tcp.",
+            "_hap._tcp.", "_matter._tcp.", "_sonos._tcp.", "_rtsp._tcp.", "_roku-ecp._tcp."
         )
     }
 }
@@ -735,10 +839,18 @@ private fun String.toLocalWebService(sourceAddress: String, source: DiscoverySou
 private fun mdnsServiceLabel(type: String): String = when {
     type.contains("googlecast") -> "Google Cast"
     type.contains("airplay") -> "AirPlay"
+    type.contains("raop") -> "AirPlay audio"
+    type.contains("ipps") -> "Secure IPP printing"
     type.contains("ipp") -> "IPP printing"
+    type.contains("printer") -> "Printer"
+    type.contains("pdl-datastream") -> "Printer data"
     type.contains("workstation") -> "Workstation"
     type.contains("smb") -> "SMB"
+    type.contains("nfs") -> "Network file sharing"
     type.contains("hap") -> "HomeKit"
+    type.contains("matter") -> "Matter"
+    type.contains("sonos") -> "Sonos"
+    type.contains("rtsp") -> "RTSP camera"
     type.contains("roku") -> "Roku ECP"
     type.contains("https") -> "HTTPS"
     else -> "HTTP"

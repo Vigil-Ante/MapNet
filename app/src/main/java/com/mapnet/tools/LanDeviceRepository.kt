@@ -93,6 +93,9 @@ class LanDeviceRepository(private val database: MapNetDatabase) {
                 isGateway = discovered.isGateway,
                 isThisDevice = discovered.isThisDevice,
                 discoverySources = combinedSources.joinToString(",") { it.name },
+                identificationSource = existing?.identificationSource,
+                identificationDetail = existing?.identificationDetail,
+                identifiedAtEpochMs = existing?.identifiedAtEpochMs,
                 firstSeenEpochMs = listOfNotNull(existing?.firstSeenEpochMs, duplicate?.firstSeenEpochMs)
                     .minOrNull() ?: nowEpochMs,
                 lastSeenEpochMs = nowEpochMs
@@ -184,6 +187,34 @@ class LanDeviceRepository(private val database: MapNetDatabase) {
 
     suspend fun forgetDevice(deviceId: String): Boolean = dao.deleteDevice(deviceId) > 0
 
+    /** Saves only automatic fields that are still missing; user labels stay untouched. */
+    suspend fun saveIdentification(
+        deviceId: String,
+        identification: DeviceIdentification,
+        nowEpochMs: Long = System.currentTimeMillis()
+    ) = database.withTransaction {
+        val current = dao.getDevice(deviceId) ?: return@withTransaction
+        val updated = current.copy(
+            advertisedName = current.advertisedName.cleanOrNull() ?: identification.friendlyName.cleanOrNull(),
+            vendor = current.vendor.cleanOrNull() ?: identification.vendor.cleanOrNull(),
+            model = current.model.cleanOrNull() ?: identification.model.cleanOrNull(),
+            discoverySources = (current.discoverySources.toDiscoverySources() + identification.source)
+                .joinToString(",") { it.name },
+            identificationSource = identification.source.name,
+            identificationDetail = identification.detail.trim().take(500),
+            identifiedAtEpochMs = nowEpochMs
+        )
+        dao.upsertDevice(updated)
+        dao.insertEvent(
+            LanDeviceEventEntity(
+                deviceId = deviceId,
+                occurredAtEpochMs = nowEpochMs,
+                type = LanDeviceEventType.USER_EDITED.name,
+                detail = "Local web identification completed"
+            )
+        )
+    }
+
     suspend fun savePortScan(
         deviceId: String,
         openPorts: List<Int>,
@@ -252,6 +283,9 @@ private fun LanDeviceEntity.toModel() = KnownLanDevice(
     isGateway = isGateway,
     isThisDevice = isThisDevice,
     sources = discoverySources.toDiscoverySources(),
+    identificationSource = identificationSource?.let { enumValueOrDefault(it, DiscoverySource.WEB_FINGERPRINT) },
+    identificationDetail = identificationDetail,
+    identifiedAtEpochMs = identifiedAtEpochMs,
     firstSeenEpochMs = firstSeenEpochMs,
     lastSeenEpochMs = lastSeenEpochMs
 )

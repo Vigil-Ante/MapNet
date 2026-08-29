@@ -133,7 +133,8 @@ class MainActivity : ComponentActivity() {
             .addMigrations(
                 MapNetDatabase.MIGRATION_1_2,
                 MapNetDatabase.MIGRATION_2_3,
-                MapNetDatabase.MIGRATION_3_4
+                MapNetDatabase.MIGRATION_3_4,
+                MapNetDatabase.MIGRATION_4_5
             )
             .build()
     }

@@ -25,7 +25,7 @@ class MapNetDatabaseMigrationTest {
     }
 
     @Test
-    fun `migration 2 to 4 keeps survey data and creates LAN inventory and custom lists`() = runBlocking {
+    fun `migration 2 to 5 keeps survey data LAN inventory custom lists and recognition fields`() = runBlocking {
         context.deleteDatabase(databaseName)
         SQLiteDatabase.openOrCreateDatabase(context.getDatabasePath(databaseName), null).use { database ->
             database.execSQL(
@@ -84,7 +84,11 @@ class MapNetDatabaseMigrationTest {
         }
 
         val room = Room.databaseBuilder(context, MapNetDatabase::class.java, databaseName)
-            .addMigrations(MapNetDatabase.MIGRATION_2_3, MapNetDatabase.MIGRATION_3_4)
+            .addMigrations(
+                MapNetDatabase.MIGRATION_2_3,
+                MapNetDatabase.MIGRATION_3_4,
+                MapNetDatabase.MIGRATION_4_5
+            )
             .allowMainThreadQueries()
             .build()
         openedDatabase = room

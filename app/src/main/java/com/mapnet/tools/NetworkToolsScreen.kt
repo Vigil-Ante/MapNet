@@ -419,9 +419,11 @@ private fun DeviceDetailScreen(
             DeviceActionGrid(
                 diagnosticsEnabled = !state.isScanning && !state.diagnostic.isRunning,
                 hasWebUrl = webUrl != null,
+                canIdentify = state.selectedServices.any { it.url.safeWebUrlFor(device.ipAddress) != null },
                 onPing = viewModel::pingSelectedDevice,
                 onTraceroute = viewModel::tracerouteSelectedDevice,
                 onPorts = { showPortScan = true },
+                onIdentify = viewModel::identifySelectedDevice,
                 onProblemSolver = viewModel::openProblemSolverForSelectedDevice,
                 onCopy = { showCopy = true },
                 onOpenWeb = {
@@ -435,6 +437,9 @@ private fun DeviceDetailScreen(
             item { DiagnosticResultCard(state.diagnostic, viewModel::cancelDiagnostic) }
         }
         item { IdentityCard(device) }
+        if (device.isGateway || device.effectiveType == LanDeviceType.ROUTER) {
+            item { RouterDefaultCredentialsCard(device) }
+        }
         item { ServicesCard(state.selectedServices, device.ipAddress) }
         item { NetworkDetailsCard(device) }
         item { TimelineCard(state.selectedEvents) }
@@ -548,9 +553,11 @@ private fun DeviceHeaderCard(device: KnownLanDevice, onEdit: () -> Unit) {
 private fun DeviceActionGrid(
     diagnosticsEnabled: Boolean,
     hasWebUrl: Boolean,
+    canIdentify: Boolean,
     onPing: () -> Unit,
     onTraceroute: () -> Unit,
     onPorts: () -> Unit,
+    onIdentify: () -> Unit,
     onProblemSolver: () -> Unit,
     onCopy: () -> Unit,
     onOpenWeb: () -> Unit
@@ -567,6 +574,11 @@ private fun DeviceActionGrid(
             DeviceActionButton("Web interface", Icons.Default.Http, hasWebUrl, onOpenWeb, Modifier.weight(1f))
             Spacer(Modifier.weight(1f))
         }
+        OutlinedButton(onClick = onIdentify, enabled = diagnosticsEnabled && canIdentify, modifier = Modifier.fillMaxWidth()) {
+            Icon(Icons.Default.Search, contentDescription = null)
+            Spacer(Modifier.width(6.dp))
+            Text("Identify device")
+        }
         OutlinedButton(onClick = onProblemSolver, enabled = diagnosticsEnabled, modifier = Modifier.fillMaxWidth()) {
             Icon(Icons.Default.NetworkCheck, contentDescription = null)
             Spacer(Modifier.width(6.dp))
@@ -574,7 +586,7 @@ private fun DeviceActionGrid(
         }
         if (!hasWebUrl) {
             Text(
-                "Web interface becomes available when a local service advertises one or a port scan finds HTTP/HTTPS.",
+                "Identify device becomes available when a local service advertises HTTP/HTTPS or a port scan finds a web service.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -634,8 +646,46 @@ private fun IdentityCard(device: KnownLanDevice) {
         DeviceDetailRow("Manufacturer", device.vendor ?: "Unknown")
         DeviceDetailRow("Model", device.model ?: "Not advertised")
         DeviceDetailRow("Type", device.effectiveType.label)
+        device.identificationSource?.let { source ->
+            DeviceDetailRow("Last identified by", source.label)
+        }
+        device.identificationDetail?.takeIf { it.isNotBlank() }?.let { detail ->
+            Text(detail, style = MaterialTheme.typography.bodySmall)
+        }
         if (device.isGateway) DeviceDetailRow("Role", "Default gateway")
         if (device.isThisDevice) DeviceDetailRow("Role", "This Android device")
+    }
+}
+
+@Composable
+private fun RouterDefaultCredentialsCard(device: KnownLanDevice) {
+    val credentials = remember(device.vendor, device.model, device.hostname, device.advertisedName, device.customName) {
+        device.defaultRouterCredentials()
+    }
+    DetailCard("Factory credential reference") {
+        Text(
+            "Only use this information for a router you own or are authorized to administer. MapNet never attempts these credentials.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error
+        )
+        Text(
+            "Factory credentials are model-, region-, ISP-, firmware-, and setup-dependent. Check the label or official manual before using any entry, then change it immediately.",
+            style = MaterialTheme.typography.bodySmall
+        )
+        if (credentials.isEmpty()) {
+            Text(
+                "No curated factory credential reference matches ${device.vendor ?: "this router"}. Check the physical label or the manufacturer's official support page.",
+                style = MaterialTheme.typography.bodySmall
+            )
+        } else {
+            credentials.forEach { credential ->
+                HorizontalDivider()
+                Text(credential.brand, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                DeviceDetailRow("Username", credential.username)
+                DeviceDetailRow("Password", credential.password)
+                Text(credential.note, style = MaterialTheme.typography.bodySmall)
+            }
+        }
     }
 }
 

@@ -62,6 +62,9 @@ data class LanDeviceEntity(
     val isGateway: Boolean,
     val isThisDevice: Boolean,
     val discoverySources: String,
+    val identificationSource: String? = null,
+    val identificationDetail: String? = null,
+    val identifiedAtEpochMs: Long? = null,
     val firstSeenEpochMs: Long,
     val lastSeenEpochMs: Long
 )

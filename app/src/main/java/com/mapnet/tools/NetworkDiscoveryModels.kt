@@ -29,7 +29,8 @@ enum class DiscoverySource(val label: String) {
     SSDP("SSDP / UPnP"),
     NETBIOS("NetBIOS"),
     MAC_VENDOR("MAC vendor database"),
-    PORT_SCAN("TCP port scan")
+    PORT_SCAN("TCP port scan"),
+    WEB_FINGERPRINT("Local web identification")
 }
 
 enum class LanDeviceEventType {
@@ -88,6 +89,22 @@ data class TcpPortScanResult(
     val scannedPorts: List<Int>,
     val openPorts: List<Int>
 )
+
+data class DeviceIdentification(
+    val friendlyName: String? = null,
+    val vendor: String? = null,
+    val model: String? = null,
+    val source: DiscoverySource,
+    val detail: String
+) {
+    fun merge(other: DeviceIdentification) = DeviceIdentification(
+        friendlyName = friendlyName ?: other.friendlyName,
+        vendor = vendor ?: other.vendor,
+        model = model ?: other.model,
+        source = source,
+        detail = listOf(detail, other.detail).filter(String::isNotBlank).distinct().joinToString(" · ").take(500)
+    )
+}
 
 enum class ProblemCheckStatus {
     PASSED,
@@ -193,6 +210,9 @@ data class KnownLanDevice(
     val isGateway: Boolean,
     val isThisDevice: Boolean,
     val sources: Set<DiscoverySource>,
+    val identificationSource: DiscoverySource? = null,
+    val identificationDetail: String? = null,
+    val identifiedAtEpochMs: Long? = null,
     val firstSeenEpochMs: Long,
     val lastSeenEpochMs: Long
 ) {
@@ -206,6 +226,75 @@ data class KnownLanDevice(
     val effectiveType: LanDeviceType
         get() = customType ?: inferredType
 }
+
+/**
+ * A small offline reference for legacy factory admin credentials. These are
+ * only hints for equipment the user owns; they are never tried by MapNet.
+ */
+data class RouterDefaultCredential(
+    val brand: String,
+    val username: String,
+    val password: String,
+    val note: String
+)
+
+fun KnownLanDevice.defaultRouterCredentials(): List<RouterDefaultCredential> {
+    if (!isGateway && effectiveType != LanDeviceType.ROUTER) return emptyList()
+    val identification = listOfNotNull(vendor, model, hostname, advertisedName, customName)
+        .joinToString(" ")
+        .lowercase()
+    return ROUTER_DEFAULT_CREDENTIALS.filter { reference ->
+        reference.keywords.any(identification::contains)
+    }.map { reference ->
+        RouterDefaultCredential(reference.brand, reference.username, reference.password, reference.note)
+    }
+}
+
+private data class RouterDefaultCredentialReference(
+    val brand: String,
+    val keywords: Set<String>,
+    val username: String,
+    val password: String,
+    val note: String
+)
+
+private val ROUTER_DEFAULT_CREDENTIALS = listOf(
+    RouterDefaultCredentialReference(
+        brand = "NETGEAR",
+        keywords = setOf("netgear"),
+        username = "admin",
+        password = "password",
+        note = "Common factory web-admin credential; verify the label for the exact model."
+    ),
+    RouterDefaultCredentialReference(
+        brand = "TP-Link (legacy)",
+        keywords = setOf("tp-link", "tplink"),
+        username = "admin",
+        password = "admin",
+        note = "Legacy models only. Many newer models require a password created during setup."
+    ),
+    RouterDefaultCredentialReference(
+        brand = "D-Link DIR series",
+        keywords = setOf("d-link", "dlink"),
+        username = "admin",
+        password = "(blank)",
+        note = "DIR-series factory setting; other D-Link products vary by model and region."
+    ),
+    RouterDefaultCredentialReference(
+        brand = "Linksys Smart Wi-Fi",
+        keywords = setOf("linksys"),
+        username = "(model-dependent)",
+        password = "admin",
+        note = "For an unconfigured router; verify the exact model and setup state."
+    ),
+    RouterDefaultCredentialReference(
+        brand = "ASUS (some models)",
+        keywords = setOf("asus"),
+        username = "admin",
+        password = "admin",
+        note = "Some models use label-specific credentials or require first-time setup."
+    )
+)
 
 data class LanDeviceEvent(
     val id: Long,
